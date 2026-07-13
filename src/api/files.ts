@@ -169,6 +169,26 @@ export function absolutePreviewUrl(storageId: string, path: string) {
   return `${window.location.origin}${previewUrl(storageId, path)}`
 }
 
+/** 用 Authorization 拉取预览内容，避免 iframe 直链因代理/鉴权落到错误主机 */
+export async function fetchPreviewBlob(storageId: string, path: string): Promise<Blob> {
+  const token = getToken()
+  const q = new URLSearchParams({ storage_id: storageId, path })
+  const res = await fetch(`/api/files/preview?${q.toString()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    let msg = '预览失败'
+    try {
+      const json = await res.json()
+      if (json?.msg) msg = json.msg
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(msg, res.status)
+  }
+  return res.blob()
+}
+
 export async function createDirectLink(storageId: string, path: string, expiresIn = 3600) {
   const data = await request<{ url: string; expires_at: string }>('/api/files/direct-link', {
     method: 'POST',
@@ -240,16 +260,86 @@ export function isOfficeEditable(name: string) {
   return OFFICE_EXT.test(name.toLowerCase())
 }
 
+export async function onlyOfficeStatus() {
+  return request<{ enabled: boolean }>('/api/files/onlyoffice/status')
+}
+
 export async function onlyOfficeConfig(storageId: string, path: string) {
   return request<{ server_url: string; config: Record<string, unknown> }>(
     `/api/files/onlyoffice/config?storage_id=${encodeURIComponent(storageId)}&path=${encodeURIComponent(path)}`,
   )
 }
 
+export interface FileRevisionItem {
+  id: number
+  storage_id: number
+  path: string
+  version: number
+  size: number
+  created_by: number
+  created_at: string
+}
+
 export async function onlyOfficeRevisions(storageId: string, path: string) {
-  return request<{ items: { id: number; version: number; size: number; created_at: string }[] }>(
+  return request<{ items: FileRevisionItem[] }>(
     `/api/files/onlyoffice/revisions?storage_id=${encodeURIComponent(storageId)}&path=${encodeURIComponent(path)}`,
   )
+}
+
+export function onlyOfficeRevisionDownloadUrl(storageId: string, path: string, version: number) {
+  const token = getToken()
+  const q = new URLSearchParams({
+    storage_id: storageId,
+    path,
+    version: String(version),
+  })
+  if (token) q.set('token', token)
+  return `/api/files/onlyoffice/revisions/download?${q.toString()}`
+}
+
+export async function onlyOfficeRestoreRevision(storageId: string, path: string, version: number) {
+  return request<{ restored_version: number }>('/api/files/onlyoffice/revisions/restore', {
+    method: 'POST',
+    body: JSON.stringify({ storage_id: storageId, path, version }),
+  })
+}
+
+export interface OfficeEditorPresence {
+  user_id: number
+  username: string
+  real_name?: string
+  color: string
+  cursor?: string
+  updated_at: string
+}
+
+export async function onlyOfficePresenceGet(storageId: string, path: string) {
+  return request<{ editors: OfficeEditorPresence[] }>(
+    `/api/files/onlyoffice/presence?storage_id=${encodeURIComponent(storageId)}&path=${encodeURIComponent(path)}`,
+  )
+}
+
+export async function onlyOfficePresenceBatch(storageId: string, paths: string[]) {
+  const q = new URLSearchParams({
+    storage_id: storageId,
+    path: '/',
+    paths: paths.join(','),
+  })
+  return request<{ by_path: Record<string, OfficeEditorPresence[]> }>(
+    `/api/files/onlyoffice/presence?${q.toString()}`,
+  )
+}
+
+export async function onlyOfficePresenceTouch(
+  storageId: string,
+  path: string,
+  action: 'join' | 'heartbeat' | 'leave',
+  cursor?: string,
+) {
+  return request<{ editors: OfficeEditorPresence[] }>('/api/files/onlyoffice/presence', {
+    method: 'POST',
+    body: JSON.stringify({ storage_id: storageId, path, action, cursor: cursor || '' }),
+  })
 }
 
 export { joinPath, parentPath }

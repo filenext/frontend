@@ -17,6 +17,7 @@ import {
   IconFolderUp,
   IconRefresh,
   IconShieldLock,
+  IconHistory,
 } from '@tabler/icons-vue'
 import { t } from '@/i18n/translate'
 
@@ -69,6 +70,14 @@ export function buildFileContextMenu(opts: {
       id: 'editOffice',
       label: t('files.editOnline'),
       icon: IconPencil,
+      disabled: !hasSingleFile || !hasOfficeFile,
+    })
+  }
+  if (!hideLocalOnly && canRead) {
+    items.push({
+      id: 'revisions',
+      label: t('files.revisions'),
+      icon: IconHistory,
       disabled: !hasSingleFile || !hasOfficeFile,
     })
   }

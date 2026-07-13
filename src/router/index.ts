@@ -11,6 +11,12 @@ const router = createRouter({
     { path: '/s/:token', name: 'share', component: () => import('@/views/ShareView.vue'), meta: { guest: true } },
     { path: '/pickup', name: 'pickup', component: () => import('@/views/PickupView.vue'), meta: { guest: true } },
     {
+      path: '/files/edit',
+      name: 'office-edit',
+      component: () => import('@/views/OfficeEditorView.vue'),
+      meta: { auth: true },
+    },
+    {
       path: '/',
       component: () => import('@/layouts/MainLayout.vue'),
       meta: { auth: true },
@@ -124,7 +130,8 @@ router.beforeEach(async (to) => {
 
   if (to.meta.auth && !token) return '/login'
 
-  if (token) {
+  // 独立鉴权页（如 /files/edit）与布局子路由一致：有 token 则校验会话
+  if (token && to.meta.auth) {
     if (!auth.user && !auth.sessionInvalid) {
       try {
         await auth.fetchMe()

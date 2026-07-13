@@ -38,11 +38,29 @@ async function save() {
     <div class="row g-3">
       <div class="col-12">
         <label class="form-label">Document Server URL</label>
-        <input v-model="form.server_url" class="form-control" placeholder="https://documentserver.example.com" />
+        <input
+          v-model="form.server_url"
+          class="form-control"
+          placeholder="http://192.168.x.x:8081 或 https://documentserver.example.com"
+        />
+        <div class="form-hint">浏览器能打开的 Document Server 地址</div>
+      </div>
+      <div class="col-12">
+        <label class="form-label">本系统回调地址（重要）</label>
+        <input
+          v-model="form.callback_base_url"
+          class="form-control"
+          placeholder="http://192.168.x.x:8080 或 http://nextfile.im-erp.com:8080"
+        />
+        <div class="form-hint">
+          Document Server <strong>服务器</strong>访问 NextFile 的根地址（不要填 localhost）。用于下载原文与保存回调；留空则使用
+          PUBLIC_BASE_URL 或当前请求 Host。
+        </div>
       </div>
       <div class="col-md-8">
         <label class="form-label">JWT Secret（与 Document Server 一致，可留空）</label>
         <input v-model="form.jwt_secret" type="password" class="form-control" />
+        <div class="form-hint">若 DS 启用了 JWT，此处必须与 DS 的 secret 完全一致，否则无法保存</div>
       </div>
       <div class="col-md-4">
         <label class="form-label">保留版本数</label>
@@ -50,8 +68,13 @@ async function save() {
       </div>
     </div>
 
-    <div class="alert alert-info mt-4 mb-0 small">
-      支持 Word / Excel / PowerPoint 等 Office 格式。请确保 Document Server 能访问本系统的文件下载回调地址。
+    <div class="alert alert-warning mt-4 mb-0 small">
+      <strong>出现「无法保存文档」时请检查：</strong>
+      <ol class="mb-0 ps-3">
+        <li>「本系统回调地址」填 DS 容器/机器能访问到的 NextFile 地址（局域网 IP 或域名，勿用 127.0.0.1）</li>
+        <li>NextFile 进程能访问 Document Server URL（保存时要回拉编辑结果）</li>
+        <li>JWT Secret 与 Document Server 配置一致（或两边都留空）</li>
+      </ol>
     </div>
 
     <div class="cd-settings-actions">

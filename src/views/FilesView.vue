@@ -45,6 +45,7 @@ import DirectoryAIPanel from '@/components/DirectoryAIPanel.vue'
 import CdModal from '@/components/CdModal.vue'
 import ShareModal from '@/components/ShareModal.vue'
 import PathAclModal from '@/components/PathAclModal.vue'
+import FileRevisionsModal from '@/components/FileRevisionsModal.vue'
 import PickupCodePanel from '@/components/PickupCodePanel.vue'
 import DestDirPicker from '@/components/DestDirPicker.vue'
 import UploadPanel from '@/components/UploadPanel.vue'
@@ -93,7 +94,11 @@ const showShare = ref(false)
 const shareTarget = ref<FileEntry | null>(null)
 const showPathAcl = ref(false)
 const aclTarget = ref<FileEntry | null>(null)
+const showRevisions = ref(false)
+const revisionsTarget = ref<FileEntry | null>(null)
 const currentPermMask = ref(0)
+const presenceByPath = ref<Record<string, filesApi.OfficeEditorPresence[]>>({})
+let presencePollTimer: ReturnType<typeof setInterval> | undefined
 const mkdirName = ref('')
 const renameName = ref('')
 const renameTarget = ref<FileEntry | null>(null)
@@ -101,10 +106,9 @@ const renameTarget = ref<FileEntry | null>(null)
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 const showPreview = ref(false)
 const previewTarget = ref<FileEntry | null>(null)
-const showOfficeEditor = ref(false)
-const officeTarget = ref<FileEntry | null>(null)
-const officeLoading = ref(false)
-const officeEditorHost = ref<HTMLDivElement | null>(null)
+const previewObjectUrl = ref('')
+const previewLoading = ref(false)
+const previewError = ref('')
 const showPathAction = ref(false)
 const pathActionMode = ref<'move' | 'copy'>('move')
 const destDir = ref('')
@@ -113,13 +117,9 @@ const aiStatus = ref<AIDirectoryStatus | null>(null)
 const aiToggling = ref(false)
 const cloudInfo = ref<CloudAccountInfo | null>(null)
 const cloudInfoLoading = ref(false)
+const onlyOfficeEnabled = ref(false)
 
 const aiEnabled = computed(() => aiStatus.value?.enabled && aiStatus.value?.can_use)
-
-const previewUrl = computed(() => {
-  if (!previewTarget.value) return ''
-  return filesApi.previewUrl(currentStorageId.value, previewTarget.value.path)
-})
 
 const previewIsImage = computed(() => {
   const m = previewTarget.value?.mimeType || ''
@@ -149,6 +149,16 @@ const previewIsText = computed(() => {
   return /\.(txt|md|json|xml|yml|yaml|log|csv|js|ts|vue|go|py|html|css)$/.test(n)
 })
 
+const previewNeedsBlob = computed(
+  () =>
+    !!previewTarget.value &&
+    (previewIsImage.value ||
+      previewIsPdf.value ||
+      previewIsVideo.value ||
+      previewIsAudio.value ||
+      previewIsText.value),
+)
+
 const fileOnlySelected = computed(() => selectedItems.value.filter((f) => !f.isDir))
 
 const permCanUpload = computed(() => canUpload(currentPermMask.value))
@@ -176,7 +186,7 @@ const contextMenuItems = computed(() => {
   const single = selectedItems.value[0]
   const hasSingleFile = n === 1 && !!single && !single.isDir
   const hasDownloadableFiles = fileOnlySelected.value.length > 0
-  const hasOfficeFile = hasSingleFile && filesApi.isOfficeEditable(single!.name)
+  const hasOfficeFile = hasSingleFile && filesApi.isOfficeEditable(single!.name) && permCanMoveCopy.value
   const isSingleDir = n === 1 && !!single?.isDir
   return buildFileContextMenu({
     selectedCount: n,
@@ -350,7 +360,7 @@ async function loadFiles() {
     files.value = await filesApi.listFiles(currentStorageId.value, currentPath.value)
     selected.value = new Set()
     lastIndex.value = -1
-    await Promise.all([loadAIStatus(), loadCurrentPerm()])
+    await Promise.all([loadAIStatus(), loadCurrentPerm(), refreshPresence()])
   } catch (e) {
     toast.show(e instanceof Error ? e.message : '加载失败')
   } finally {
@@ -416,6 +426,16 @@ function goUp() {
   if (canGoUp.value) navigate(parentDir.value)
 }
 
+function onRowClick(item: FileEntry, index: number, e: MouseEvent) {
+  if (e.ctrlKey || e.metaKey || e.shiftKey) {
+    toggleRow(item, index, e)
+    return
+  }
+  selected.value = new Set([item.id])
+  lastIndex.value = index
+  openItem(item)
+}
+
 function toggleRow(item: FileEntry, index: number, e: MouseEvent) {
   if (e.ctrlKey || e.metaKey) {
     if (selected.value.has(item.id)) selected.value.delete(item.id)
@@ -444,8 +464,16 @@ function toggleSelectAll() {
 }
 
 function openItem(item: FileEntry) {
-  if (item.isDir) navigate(item.path)
-  else openPreview(item)
+  if (item.isDir) {
+    navigate(item.path)
+    return
+  }
+  // Office 文件直接进编辑页（由编辑页处理 OnlyOffice 未启用等错误）
+  if (filesApi.isOfficeEditable(item.name)) {
+    openOfficeEditor(item)
+    return
+  }
+  openPreview(item)
 }
 
 function clearSelection() {
@@ -616,67 +644,96 @@ const rowShareLabel = computed(() =>
   usesCloudShare.value && canBaiduShare.value ? '百度网盘分享' : '分享',
 )
 
+function revokePreviewObjectUrl() {
+  if (previewObjectUrl.value) {
+    URL.revokeObjectURL(previewObjectUrl.value)
+    previewObjectUrl.value = ''
+  }
+}
+
+async function loadPreviewBlob(target: FileEntry) {
+  revokePreviewObjectUrl()
+  previewError.value = ''
+  if (!previewNeedsBlob.value) return
+  previewLoading.value = true
+  try {
+    const blob = await filesApi.fetchPreviewBlob(currentStorageId.value, target.path)
+    // 部分存储未带正确 MIME，PDF 强制指定以免浏览器当下载处理
+    const type =
+      previewIsPdf.value && (!blob.type || blob.type === 'application/octet-stream')
+        ? 'application/pdf'
+        : blob.type
+    const finalBlob = type && type !== blob.type ? new Blob([blob], { type }) : blob
+    previewObjectUrl.value = URL.createObjectURL(finalBlob)
+  } catch (e) {
+    previewError.value = e instanceof ApiError ? e.message : t('files.previewFailed')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function closePreview() {
+  showPreview.value = false
+  previewTarget.value = null
+  previewError.value = ''
+  previewLoading.value = false
+  revokePreviewObjectUrl()
+}
+
 function openPreview(item?: FileEntry) {
   if (!permCanPreview.value && !permCanRead.value) return toast.show(t('files.noPreviewPerm'))
   const target = item || selectedItems.value[0]
   if (!target || target.isDir) return
+  if (filesApi.isOfficeEditable(target.name)) {
+    openOfficeEditor(target)
+    return
+  }
   previewTarget.value = target
   showPreview.value = true
+  void loadPreviewBlob(target)
 }
 
-declare global {
-  interface Window {
-    DocsAPI?: { DocEditor: new (id: string, cfg: Record<string, unknown>) => { destroyEditor?: () => void } }
-  }
+function openRevisions(item?: FileEntry) {
+  const target = item || selectedItems.value[0]
+  if (!target || target.isDir || !filesApi.isOfficeEditable(target.name)) return
+  revisionsTarget.value = target
+  showRevisions.value = true
 }
 
-let officeEditorInstance: { destroyEditor?: () => void } | null = null
-
-function loadOnlyOfficeScript(serverUrl: string) {
-  return new Promise<void>((resolve, reject) => {
-    const src = `${serverUrl.replace(/\/$/, '')}/web-apps/apps/api/documents/api.js`
-    const existing = document.querySelector(`script[src="${src}"]`)
-    if (existing) {
-      resolve()
-      return
-    }
-    const script = document.createElement('script')
-    script.src = src
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('无法加载 ONLYOFFICE 脚本'))
-    document.head.appendChild(script)
+function openOfficeEditor(item?: FileEntry) {
+  const target = item || selectedItems.value[0]
+  if (!target || target.isDir || !filesApi.isOfficeEditable(target.name)) return
+  if (!permCanMoveCopy.value) return toast.show(t('files.noEditPerm'))
+  closePreview()
+  router.push({
+    name: 'office-edit',
+    query: {
+      storage_id: currentStorageId.value,
+      path: target.path,
+    },
   })
 }
 
-async function openOfficeEditor(item?: FileEntry) {
-  if (!permCanMoveCopy.value) return toast.show(t('files.noEditPerm'))
-  const target = item || selectedItems.value[0]
-  if (!target || target.isDir || !filesApi.isOfficeEditable(target.name)) return
-  officeTarget.value = target
-  showOfficeEditor.value = true
-  officeLoading.value = true
+async function refreshPresence() {
+  if (!currentStorageId.value || !files.value.length) {
+    presenceByPath.value = {}
+    return
+  }
+  const paths = files.value.filter((f) => !f.isDir && filesApi.isOfficeEditable(f.name)).map((f) => f.path)
+  if (!paths.length) {
+    presenceByPath.value = {}
+    return
+  }
   try {
-    const res = await filesApi.onlyOfficeConfig(currentStorageId.value, target.path)
-    await loadOnlyOfficeScript(res.server_url)
-    await new Promise((r) => setTimeout(r, 50))
-    if (officeEditorInstance?.destroyEditor) officeEditorInstance.destroyEditor()
-    if (officeEditorHost.value) officeEditorHost.value.innerHTML = ''
-    officeEditorInstance = new window.DocsAPI!.DocEditor('cd-onlyoffice-editor', res.config)
-  } catch (e) {
-    showOfficeEditor.value = false
-    toast.show(e instanceof ApiError ? e.message : '打开编辑器失败')
-  } finally {
-    officeLoading.value = false
+    const res = await filesApi.onlyOfficePresenceBatch(currentStorageId.value, paths)
+    presenceByPath.value = res.by_path || {}
+  } catch {
+    /* ignore */
   }
 }
 
-function closeOfficeEditor() {
-  if (officeEditorInstance?.destroyEditor) officeEditorInstance.destroyEditor()
-  officeEditorInstance = null
-  if (officeEditorHost.value) officeEditorHost.value.innerHTML = ''
-  showOfficeEditor.value = false
-  officeTarget.value = null
-  loadFiles()
+function editorsFor(path: string) {
+  return presenceByPath.value[path] || []
 }
 
 const pathActionBlocked = computed(() => {
@@ -734,6 +791,7 @@ function onContextMenuSelect(id: string) {
   switch (id) {
     case 'preview': openPreview(); break
     case 'editOffice': openOfficeEditor(); break
+    case 'revisions': openRevisions(); break
     case 'download': onDownload(); break
     case 'copyDlLink':
       if (single && !single.isDir) copyText(filesApi.absoluteDownloadUrl(currentStorageId.value, single.path), '下载链接已复制')
@@ -828,15 +886,30 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'F2' && selectedCount.value === 1 && permCanRename.value) openRename(selectedItems.value[0])
 }
 
+async function loadOnlyOfficeStatus() {
+  try {
+    const res = await filesApi.onlyOfficeStatus()
+    onlyOfficeEnabled.value = !!res.enabled
+  } catch {
+    onlyOfficeEnabled.value = false
+  }
+}
+
 onMounted(async () => {
-  await loadStorages()
+  await Promise.all([loadStorages(), loadOnlyOfficeStatus()])
   if (currentStorageId.value) {
     if (!route.query.tab && !route.query.storage) syncRouteQuery()
     await Promise.all([loadFiles(), loadCloudInfo()])
   }
   window.addEventListener('keydown', onKeydown)
+  presencePollTimer = setInterval(() => {
+    void refreshPresence()
+  }, 15000)
 })
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  if (presencePollTimer) clearInterval(presencePollTimer)
+})
 
 watch(
   () => [route.query.tab, route.query.storage, route.query.path],
@@ -1078,8 +1151,7 @@ watch(
                   v-for="(item, idx) in filteredFiles"
                   :key="item.id"
                   :class="{ selected: selected.has(item.id) }"
-                  @click="toggleRow(item, idx, $event)"
-                  @dblclick="openItem(item)"
+                  @click="onRowClick(item, idx, $event)"
                   @contextmenu="openContextMenu($event, item)"
                 >
                   <td @click.stop>
@@ -1094,6 +1166,13 @@ watch(
                     <span class="d-inline-flex align-items-center gap-2 cd-file-name-cell">
                       <FileTypeIcon :name="item.name" :is-dir="item.isDir" :mime-type="item.mimeType" />
                       <span class="text-truncate">{{ item.name }}</span>
+                      <span
+                        v-if="editorsFor(item.path).length"
+                        class="cd-file-editing-badge"
+                        :title="editorsFor(item.path).map((e) => e.real_name || e.username).join('、')"
+                      >
+                        {{ t('files.editingWith', { n: editorsFor(item.path).length }) }}
+                      </span>
                     </span>
                   </td>
                   <td class="cd-file-actions-col d-none d-sm-table-cell" @click.stop>
@@ -1126,12 +1205,14 @@ watch(
               type="button"
               class="cd-grid-item"
               :class="{ selected: selected.has(item.id) }"
-              @click="toggleRow(item, idx, $event)"
-              @dblclick="openItem(item)"
+              @click="onRowClick(item, idx, $event)"
               @contextmenu="openContextMenu($event, item)"
             >
               <FileTypeIcon :name="item.name" :is-dir="item.isDir" :mime-type="item.mimeType" :size="38" />
               <span class="cd-grid-name">{{ item.name }}</span>
+              <span v-if="editorsFor(item.path).length" class="cd-file-editing-badge cd-file-editing-badge--grid">
+                {{ t('files.editingWith', { n: editorsFor(item.path).length }) }}
+              </span>
               <span v-if="!item.isDir" class="cd-grid-meta">{{ fmtSize(item.size) }}</span>
             </button>
           </div>
@@ -1259,40 +1340,74 @@ watch(
     </CdModal>
 
     <!-- 预览 -->
-    <CdModal :show="showPreview" :title="previewTarget?.name || '预览'" size="lg" @close="showPreview = false">
+    <CdModal :show="showPreview" :title="previewTarget?.name || '预览'" size="lg" @close="closePreview">
       <div class="modal-body cd-preview-body">
-        <img v-if="previewIsImage" :src="previewUrl" :alt="previewTarget?.name" class="cd-preview-img" />
-        <iframe v-else-if="previewIsPdf" :src="previewUrl" class="cd-preview-frame" title="preview" />
-        <video v-else-if="previewIsVideo" :src="previewUrl" class="cd-preview-frame" controls />
-        <audio v-else-if="previewIsAudio" :src="previewUrl" class="w-100" controls />
-        <iframe v-else-if="previewIsText" :src="previewUrl" class="cd-preview-frame" title="preview" />
+        <div v-if="previewLoading" class="text-center text-secondary py-5">{{ t('common.loading') }}</div>
+        <div v-else-if="previewError" class="text-center text-secondary py-4">
+          <p>{{ previewError }}</p>
+          <button type="button" class="btn btn-sm btn-primary" @click="onDownload(previewTarget ? [previewTarget] : [])">
+            {{ t('files.download') }}
+          </button>
+        </div>
+        <img
+          v-else-if="previewIsImage && previewObjectUrl"
+          :src="previewObjectUrl"
+          :alt="previewTarget?.name"
+          class="cd-preview-img"
+        />
+        <iframe
+          v-else-if="previewIsPdf && previewObjectUrl"
+          :src="previewObjectUrl"
+          class="cd-preview-frame"
+          title="preview"
+        />
+        <video
+          v-else-if="previewIsVideo && previewObjectUrl"
+          :src="previewObjectUrl"
+          class="cd-preview-frame"
+          controls
+        />
+        <audio
+          v-else-if="previewIsAudio && previewObjectUrl"
+          :src="previewObjectUrl"
+          class="w-100"
+          controls
+        />
+        <iframe
+          v-else-if="previewIsText && previewObjectUrl"
+          :src="previewObjectUrl"
+          class="cd-preview-frame"
+          title="preview"
+        />
         <div v-else class="text-center text-secondary py-4">
-          <p>此文件类型暂不支持在线预览</p>
+          <p>{{ t('files.previewUnsupported') }}</p>
           <button
             v-if="previewTarget && filesApi.isOfficeEditable(previewTarget.name)"
             type="button"
             class="btn btn-sm btn-primary me-2"
             @click="openOfficeEditor(previewTarget)"
           >
-            在线编辑
+            {{ t('files.editOnline') }}
           </button>
-          <button type="button" class="btn btn-sm btn-primary" @click="onDownload(previewTarget ? [previewTarget] : [])">下载</button>
+          <button type="button" class="btn btn-sm btn-primary" @click="onDownload(previewTarget ? [previewTarget] : [])">
+            {{ t('files.download') }}
+          </button>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-sm" @click="showPreview = false">关闭</button>
+        <button type="button" class="btn btn-sm" @click="closePreview">{{ t('common.close') }}</button>
       </div>
     </CdModal>
 
-    <CdModal :show="showOfficeEditor" :title="officeTarget?.name || '在线编辑'" size="lg" @close="closeOfficeEditor">
-      <div class="modal-body p-0 cd-onlyoffice-wrap">
-        <div v-if="officeLoading" class="text-center text-secondary py-5">加载编辑器…</div>
-        <div id="cd-onlyoffice-editor" ref="officeEditorHost" class="cd-onlyoffice-editor" />
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-sm" @click="closeOfficeEditor">关闭</button>
-      </div>
-    </CdModal>
+    <FileRevisionsModal
+      :show="showRevisions"
+      :storage-id="currentStorageId"
+      :path="revisionsTarget?.path || ''"
+      :file-name="revisionsTarget?.name || ''"
+      :can-restore="permCanMoveCopy"
+      @close="showRevisions = false; revisionsTarget = null"
+      @restored="loadFiles"
+    />
 
     <FileContextMenu
       :show="ctxMenu.show"

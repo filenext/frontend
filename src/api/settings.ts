@@ -88,6 +88,8 @@ export interface OnlyOfficeSettings {
   server_url: string
   jwt_secret: string
   version_keep: number
+  /** Document Server 访问本系统的根地址，如 http://192.168.x.x:8080 */
+  callback_base_url?: string
 }
 
 export interface CloudStorageApp {

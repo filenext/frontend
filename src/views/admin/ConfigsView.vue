@@ -80,6 +80,7 @@ const onlyoffice = ref<OnlyOfficeSettings>({
   server_url: '',
   jwt_secret: '',
   version_keep: 5,
+  callback_base_url: '',
 })
 
 const nav: { id: SettingsSection; label: string; icon: typeof IconAdjustments }[] = [
