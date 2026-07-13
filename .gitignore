@@ -1,0 +1,25 @@
+# 依赖与构建
+node_modules/
+dist/
+*.local
+.vite/
+*.tsbuildinfo
+
+# 误入仓库的本地工具缓存
+/bin/
+/pkg/
+
+# 环境
+.env
+.env.*
+!.env.example
+
+# IDE / OS / 日志
+.idea/
+.vscode/
+.DS_Store
+*.log
+package-lock.json
+pnpm-lock.yaml
+npm-debug.log*
+pnpm-debug.log*
