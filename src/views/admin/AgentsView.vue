@@ -9,6 +9,7 @@ import type { DepartmentRow } from '@/api/departments'
 import * as usersApi from '@/api/users'
 import type { UserRow } from '@/api/users'
 import { useAgentsStore } from '@/stores/agents'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { usePageSize } from '@/composables/usePageSize'
 import CdModal from '@/components/CdModal.vue'
@@ -18,6 +19,7 @@ import AvatarPicker from '@/components/AvatarPicker.vue'
 import AssistantReply from '@/components/AssistantReply.vue'
 
 const toast = useToast()
+const auth = useAuthStore()
 const agentsStore = useAgentsStore()
 const { pageSize, ensurePageSize } = usePageSize()
 
@@ -335,7 +337,13 @@ function providerLabel(p: string) {
           <button type="button" class="btn btn-sm btn-ghost-secondary" title="编辑" @click="openEdit(a)">
             <IconPencil :size="15" />
           </button>
-          <button type="button" class="btn btn-sm btn-ghost-danger ms-auto" title="删除" @click="remove(a)">
+          <button
+            v-if="auth.isSuperAdmin"
+            type="button"
+            class="btn btn-sm btn-ghost-danger ms-auto"
+            title="删除"
+            @click="remove(a)"
+          >
             <IconTrash :size="15" />
           </button>
         </div>

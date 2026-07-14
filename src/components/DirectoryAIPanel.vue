@@ -23,7 +23,10 @@ const props = defineProps<{
   storageId: string
   path: string
   status: AIDirectoryStatus | null
+  mobileOpen?: boolean
 }>()
+
+const emit = defineEmits<{ closeMobile: [] }>()
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -205,7 +208,11 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <aside v-if="enabled" class="cd-ai-panel">
+  <aside
+    v-if="enabled"
+    class="cd-ai-panel"
+    :class="{ 'cd-ai-panel--mobile-open': mobileOpen }"
+  >
     <header class="cd-ai-panel-head">
       <div class="cd-ai-panel-brand">
         <span class="cd-ai-panel-icon" aria-hidden="true">
@@ -236,6 +243,14 @@ function onKeydown(e: KeyboardEvent) {
           @click="clearChat"
         >
           <IconTrash :size="15" :stroke="1.75" />
+        </button>
+        <button
+          type="button"
+          class="cd-ai-icon-btn cd-ai-panel-close-mobile"
+          title="关闭"
+          @click="emit('closeMobile')"
+        >
+          <IconX :size="16" :stroke="1.75" />
         </button>
       </div>
     </header>
@@ -999,6 +1014,31 @@ function onKeydown(e: KeyboardEvent) {
 @media (max-width: 1100px) {
   .cd-ai-panel {
     width: 20rem;
+  }
+}
+
+.cd-ai-panel-close-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .cd-ai-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 2500;
+    width: 100% !important;
+    border-left: none;
+    transform: translateY(105%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.18);
+  }
+
+  .cd-ai-panel.cd-ai-panel--mobile-open {
+    transform: translateY(0);
+  }
+
+  .cd-ai-panel-close-mobile {
+    display: inline-flex;
   }
 }
 </style>

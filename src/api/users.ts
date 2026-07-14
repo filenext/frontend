@@ -11,6 +11,7 @@ export interface UserRow {
   timezone: string
   avatar_url?: string | null
   created_at: string
+  is_system?: boolean
 }
 
 import type { PageResult } from './pagination'

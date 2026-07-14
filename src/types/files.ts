@@ -34,6 +34,7 @@ export interface StorageRow {
   root_path: string
   access_root_path?: string
   enabled: boolean
+  sort_order?: number
   remark?: string
   config?: StorageConfig
 }

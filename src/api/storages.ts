@@ -7,6 +7,7 @@ export interface StoragePayload {
   driver: string
   root_path?: string
   enabled?: boolean
+  sort_order?: number
   remark?: string
   config?: StorageConfig
 }

@@ -8,6 +8,9 @@ import {
   IconUpload,
   IconFolderUp,
   IconFolderPlus,
+  IconFileText,
+  IconFileCode,
+  IconPlus,
   IconDotsVertical,
   IconLink,
   IconDownload,
@@ -31,6 +34,12 @@ import * as aiApi from '@/api/ai'
 import type { AIDirectoryStatus } from '@/api/ai'
 import type { FileEntry, StorageRow } from '@/types/files'
 import { joinPath, parentPath, pathWithin } from '@/utils/paths'
+import {
+  blankContentFor,
+  createKindMeta,
+  ensureExtension,
+  type CreateKind,
+} from '@/utils/blankOfficeTemplates'
 import { buildFileContextMenu, DEV_MENU_IDS } from '@/utils/fileContextMenu'
 import { collectDirectoryInput, collectDropEntries, type UploadEntry } from '@/utils/folderUpload'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -46,6 +55,7 @@ import CdModal from '@/components/CdModal.vue'
 import ShareModal from '@/components/ShareModal.vue'
 import PathAclModal from '@/components/PathAclModal.vue'
 import FileRevisionsModal from '@/components/FileRevisionsModal.vue'
+import ImageLightbox from '@/components/ImageLightbox.vue'
 import PickupCodePanel from '@/components/PickupCodePanel.vue'
 import DestDirPicker from '@/components/DestDirPicker.vue'
 import UploadPanel from '@/components/UploadPanel.vue'
@@ -88,7 +98,10 @@ const loading = ref(false)
 const viewMode = ref<'list' | 'grid'>('list')
 const dragOver = ref(false)
 
-const showMkdir = ref(false)
+const showCreate = ref(false)
+const createKind = ref<CreateKind>('folder')
+const createName = ref('')
+const creating = ref(false)
 const showRename = ref(false)
 const showShare = ref(false)
 const shareTarget = ref<FileEntry | null>(null)
@@ -99,12 +112,18 @@ const revisionsTarget = ref<FileEntry | null>(null)
 const currentPermMask = ref(0)
 const presenceByPath = ref<Record<string, filesApi.OfficeEditorPresence[]>>({})
 let presencePollTimer: ReturnType<typeof setInterval> | undefined
-const mkdirName = ref('')
 const renameName = ref('')
 const renameTarget = ref<FileEntry | null>(null)
 
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
+const uploadMenuOpen = ref(false)
+const createMenuOpen = ref(false)
+const aiMobileOpen = ref(false)
+let longPressTimer: ReturnType<typeof setTimeout> | undefined
+let longPressMoved = false
 const showPreview = ref(false)
+const showImageLightbox = ref(false)
+const imageLightboxPath = ref('')
 const previewTarget = ref<FileEntry | null>(null)
 const previewObjectUrl = ref('')
 const previewLoading = ref(false)
@@ -121,11 +140,14 @@ const onlyOfficeEnabled = ref(false)
 
 const aiEnabled = computed(() => aiStatus.value?.enabled && aiStatus.value?.can_use)
 
-const previewIsImage = computed(() => {
-  const m = previewTarget.value?.mimeType || ''
-  const n = previewTarget.value?.name.toLowerCase() || ''
+function isImageFile(item: FileEntry) {
+  const m = item.mimeType || ''
+  const n = item.name.toLowerCase()
   return m.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/.test(n)
-})
+}
+
+/** Images in the current directory listing (use full list, not keyword filter). */
+const directoryImages = computed(() => files.value.filter((f) => !f.isDir && isImageFile(f)))
 
 const previewIsPdf = computed(() => {
   const m = previewTarget.value?.mimeType || ''
@@ -152,8 +174,7 @@ const previewIsText = computed(() => {
 const previewNeedsBlob = computed(
   () =>
     !!previewTarget.value &&
-    (previewIsImage.value ||
-      previewIsPdf.value ||
+    (previewIsPdf.value ||
       previewIsVideo.value ||
       previewIsAudio.value ||
       previewIsText.value),
@@ -187,12 +208,14 @@ const contextMenuItems = computed(() => {
   const hasSingleFile = n === 1 && !!single && !single.isDir
   const hasDownloadableFiles = fileOnlySelected.value.length > 0
   const hasOfficeFile = hasSingleFile && filesApi.isOfficeEditable(single!.name) && permCanMoveCopy.value
+  const hasTextFile = hasSingleFile && filesApi.isTextEditable(single!.name) && permCanMoveCopy.value
   const isSingleDir = n === 1 && !!single?.isDir
   return buildFileContextMenu({
     selectedCount: n,
     hasSingleFile,
     hasDownloadableFiles,
     hasOfficeFile,
+    hasTextFile,
     isCloudDriver: isCloudDriver.value,
     supportsCloudShare: usesCloudShare.value && canBaiduShare.value,
     canShare: permCanShare.value,
@@ -468,8 +491,16 @@ function openItem(item: FileEntry) {
     navigate(item.path)
     return
   }
-  // Office 文件直接进编辑页（由编辑页处理 OnlyOffice 未启用等错误）
+  if (filesApi.isTextEditable(item.name)) {
+    openTextEditor(item)
+    return
+  }
+  // Office（含 PDF）：OnlyOffice 可用则直接进编辑/批注；PDF 未启用时回退全屏预览
   if (filesApi.isOfficeEditable(item.name)) {
+    if (filesApi.isPdfFile(item.name) && !(onlyOfficeEnabled.value && permCanMoveCopy.value)) {
+      openPreview(item)
+      return
+    }
     openOfficeEditor(item)
     return
   }
@@ -480,15 +511,60 @@ function clearSelection() {
   selected.value = new Set()
 }
 
-async function doMkdir() {
+function openCreateDialog(kind: CreateKind) {
+  closeToolbarMenus()
+  if (kind === 'folder') {
+    if (!permCanMkdir.value) return toast.show(t('files.noUploadPerm'))
+  } else if (!permCanUpload.value) {
+    return toast.show(t('files.noUploadPerm'))
+  }
+  const meta = createKindMeta(kind)
+  if (meta.requiresOffice && !onlyOfficeEnabled.value) return
+  createKind.value = kind
+  createName.value = meta.defaultName || ''
+  showCreate.value = true
+}
+
+async function doCreate() {
+  const kind = createKind.value
+  const meta = createKindMeta(kind)
+  let name = createName.value.trim()
+  if (!name) return
+  if (kind !== 'folder') name = ensureExtension(name, meta.ext)
+  creating.value = true
   try {
-    await filesApi.mkdir(currentStorageId.value, currentPath.value, mkdirName.value)
-    showMkdir.value = false
-    mkdirName.value = ''
-    toast.show('文件夹已创建')
-    loadFiles()
+    if (kind === 'folder') {
+      await filesApi.mkdir(currentStorageId.value, currentPath.value, name)
+      showCreate.value = false
+      toast.show(t('files.created'))
+      await loadFiles()
+      return
+    }
+    await filesApi.createFile(
+      currentStorageId.value,
+      currentPath.value,
+      name,
+      blankContentFor(kind),
+    )
+    showCreate.value = false
+    toast.show(t('files.created'))
+    await loadFiles()
+    const path = joinPath(currentPath.value, name)
+    if (meta.editor === 'text') {
+      router.push({
+        name: 'text-edit',
+        query: { storage_id: currentStorageId.value, path },
+      })
+    } else if (meta.editor === 'office') {
+      router.push({
+        name: 'office-edit',
+        query: { storage_id: currentStorageId.value, path },
+      })
+    }
   } catch (e) {
-    toast.show(e instanceof Error ? e.message : '创建失败')
+    toast.show(e instanceof Error ? e.message : t('files.createFailed'))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -680,18 +756,44 @@ function closePreview() {
   revokePreviewObjectUrl()
 }
 
+function closeImageLightbox() {
+  showImageLightbox.value = false
+  imageLightboxPath.value = ''
+}
+
+function openImageLightbox(item: FileEntry) {
+  imageLightboxPath.value = item.path
+  showImageLightbox.value = true
+}
+
 function openPreview(item?: FileEntry) {
   if (!permCanPreview.value && !permCanRead.value) return toast.show(t('files.noPreviewPerm'))
   const target = item || selectedItems.value[0]
   if (!target || target.isDir) return
-  if (filesApi.isOfficeEditable(target.name)) {
+  if (filesApi.isTextEditable(target.name)) {
+    openTextEditor(target)
+    return
+  }
+  if (filesApi.isOfficeEditable(target.name) && !filesApi.isPdfFile(target.name)) {
     openOfficeEditor(target)
+    return
+  }
+  if (isImageFile(target)) {
+    openImageLightbox(target)
     return
   }
   previewTarget.value = target
   showPreview.value = true
   void loadPreviewBlob(target)
 }
+
+const canEditPreviewPdf = computed(
+  () =>
+    !!previewTarget.value &&
+    filesApi.isPdfFile(previewTarget.value.name) &&
+    onlyOfficeEnabled.value &&
+    permCanMoveCopy.value,
+)
 
 function openRevisions(item?: FileEntry) {
   const target = item || selectedItems.value[0]
@@ -700,10 +802,25 @@ function openRevisions(item?: FileEntry) {
   showRevisions.value = true
 }
 
+function openTextEditor(item?: FileEntry) {
+  const target = item || selectedItems.value[0]
+  if (!target || target.isDir || !filesApi.isTextEditable(target.name)) return
+  if (!permCanMoveCopy.value) return toast.show(t('files.noEditPerm'))
+  closePreview()
+  router.push({
+    name: 'text-edit',
+    query: {
+      storage_id: currentStorageId.value,
+      path: target.path,
+    },
+  })
+}
+
 function openOfficeEditor(item?: FileEntry) {
   const target = item || selectedItems.value[0]
   if (!target || target.isDir || !filesApi.isOfficeEditable(target.name)) return
   if (!permCanMoveCopy.value) return toast.show(t('files.noEditPerm'))
+  if (!onlyOfficeEnabled.value) return toast.show(t('files.officeNotEnabled'))
   closePreview()
   router.push({
     name: 'office-edit',
@@ -766,19 +883,62 @@ async function submitPathAction() {
   }
 }
 
-function openContextMenu(e: MouseEvent, item?: FileEntry) {
-  e.preventDefault()
+function openContextMenu(e: MouseEvent | { clientX: number; clientY: number; preventDefault?: () => void }, item?: FileEntry) {
+  e.preventDefault?.()
   const x = Math.min(e.clientX, window.innerWidth - 220)
   const y = Math.min(e.clientY, window.innerHeight - 480)
   if (item && !selected.value.has(item.id)) {
     selected.value = new Set([item.id])
     lastIndex.value = filteredFiles.value.findIndex((f) => f.id === item.id)
   }
+  uploadMenuOpen.value = false
+  createMenuOpen.value = false
   ctxMenu.value = { show: true, x, y }
 }
 
 function closeContextMenu() {
   ctxMenu.value.show = false
+}
+
+function toggleUploadMenu() {
+  createMenuOpen.value = false
+  uploadMenuOpen.value = !uploadMenuOpen.value
+}
+
+function toggleCreateMenu() {
+  uploadMenuOpen.value = false
+  createMenuOpen.value = !createMenuOpen.value
+}
+
+function closeToolbarMenus() {
+  uploadMenuOpen.value = false
+  createMenuOpen.value = false
+}
+
+function onItemPointerDown(e: PointerEvent, item: FileEntry) {
+  if (e.pointerType === 'mouse') return
+  longPressMoved = false
+  clearTimeout(longPressTimer)
+  longPressTimer = setTimeout(() => {
+    if (longPressMoved) return
+    openContextMenu({ clientX: e.clientX, clientY: e.clientY }, item)
+  }, 480)
+}
+
+function onItemPointerMove() {
+  longPressMoved = true
+  clearTimeout(longPressTimer)
+}
+
+function onItemPointerUp() {
+  clearTimeout(longPressTimer)
+}
+
+function openItemMenu(e: Event, item: FileEntry) {
+  e.stopPropagation()
+  e.preventDefault()
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  openContextMenu({ clientX: rect.left, clientY: rect.bottom }, item)
 }
 
 function onContextMenuSelect(id: string) {
@@ -790,7 +950,14 @@ function onContextMenuSelect(id: string) {
   const single = selectedItems.value[0]
   switch (id) {
     case 'preview': openPreview(); break
-    case 'editOffice': openOfficeEditor(); break
+    case 'editOnline':
+    case 'editOffice':
+      {
+        const target = selectedItems.value[0]
+        if (target && filesApi.isTextEditable(target.name)) openTextEditor(target)
+        else openOfficeEditor()
+      }
+      break
     case 'revisions': openRevisions(); break
     case 'download': onDownload(); break
     case 'copyDlLink':
@@ -806,7 +973,7 @@ function onContextMenuSelect(id: string) {
     case 'copy': openPathAction('copy'); break
     case 'delete': doDelete(); break
     case 'manageAcl': openPathAcl(single); break
-    case 'mkdir': showMkdir.value = true; break
+    case 'mkdir': openCreateDialog('folder'); break
     case 'upload': pickUpload(); break
     case 'uploadDir': pickUploadDir(); break
     case 'refresh': loadFiles(); break
@@ -817,11 +984,13 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const dirInput = ref<HTMLInputElement | null>(null)
 
 function pickUpload() {
+  closeToolbarMenus()
   if (!permCanUpload.value) return toast.show(t('files.noUploadPerm'))
   fileInput.value?.click()
 }
 
 function pickUploadDir() {
+  closeToolbarMenus()
   if (!permCanUpload.value) return toast.show(t('files.noUploadPerm'))
   dirInput.value?.click()
 }
@@ -881,6 +1050,8 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     clearSelection()
     closeContextMenu()
+    closeToolbarMenus()
+    aiMobileOpen.value = false
   }
   if (e.key === 'Delete' && selectedCount.value && permCanDelete.value) doDelete()
   if (e.key === 'F2' && selectedCount.value === 1 && permCanRename.value) openRename(selectedItems.value[0])
@@ -949,7 +1120,7 @@ watch(
           <span v-if="!storageCollapsed" class="cd-file-storage-name">{{ s.name }}</span>
         </button>
       </nav>
-      <div v-if="showCloudPanel" class="cd-file-cloud-panel">
+      <div v-if="showCloudPanel" class="cd-file-cloud-panel d-none d-md-block">
         <div v-if="cloudInfoLoading" class="cd-file-cloud-loading text-secondary small">加载账号信息…</div>
         <template v-else-if="cloudInfo">
           <div class="cd-file-cloud-user">
@@ -994,7 +1165,7 @@ watch(
         <button
           v-if="auth.isAdmin"
           type="button"
-          class="btn btn-sm d-inline-flex align-items-center gap-1"
+          class="btn btn-sm d-none d-md-inline-flex align-items-center gap-1"
           :class="aiStatus?.enabled ? 'btn-success' : 'btn-outline-secondary'"
           :disabled="aiToggling"
           @click="toggleAIDirectory"
@@ -1002,11 +1173,13 @@ watch(
           <IconAiAgent :size="16" />
           {{ aiStatus?.enabled ? t('files.aiOn') : t('files.enableAi') }}
         </button>
-        <div v-if="permCanUpload" class="cd-upload-trigger">
+        <div v-if="permCanUpload" class="cd-upload-trigger" :class="{ 'is-open': uploadMenuOpen }">
           <button
             type="button"
             class="btn btn-primary btn-sm cd-upload-trigger__btn d-inline-flex align-items-center gap-1"
-            @click="pickUpload"
+            aria-haspopup="menu"
+            :aria-expanded="uploadMenuOpen"
+            @click="toggleUploadMenu"
           >
             <IconUpload :size="16" /> {{ t('files.upload') }}
           </button>
@@ -1021,27 +1194,100 @@ watch(
             </button>
           </div>
         </div>
+        <div v-if="permCanMkdir || permCanUpload" class="cd-upload-trigger" :class="{ 'is-open': createMenuOpen }">
+          <button
+            type="button"
+            class="btn btn-sm cd-upload-trigger__btn d-inline-flex align-items-center gap-1"
+            aria-haspopup="menu"
+            :aria-expanded="createMenuOpen"
+            @click="toggleCreateMenu"
+          >
+            <IconPlus :size="16" /> {{ t('files.new') }}
+          </button>
+          <div class="cd-upload-trigger__menu cd-upload-trigger__menu--wide" role="menu">
+            <div class="cd-upload-trigger__label">{{ t('files.newSection') }}</div>
+            <button
+              v-if="permCanMkdir"
+              type="button"
+              class="cd-upload-trigger__item"
+              role="menuitem"
+              @click="openCreateDialog('folder')"
+            >
+              <IconFolderPlus :size="16" />
+              <span>{{ t('files.newFolder') }}</span>
+            </button>
+            <button
+              v-if="permCanUpload"
+              type="button"
+              class="cd-upload-trigger__item"
+              role="menuitem"
+              @click="openCreateDialog('txt')"
+            >
+              <IconFileText :size="16" />
+              <span>{{ t('files.newNotepad') }}</span>
+            </button>
+            <button
+              v-if="permCanUpload"
+              type="button"
+              class="cd-upload-trigger__item"
+              role="menuitem"
+              @click="openCreateDialog('md')"
+            >
+              <IconFileCode :size="16" />
+              <span>{{ t('files.newMarkdown') }}</span>
+            </button>
+            <template v-if="onlyOfficeEnabled && permCanUpload">
+              <button type="button" class="cd-upload-trigger__item" role="menuitem" @click="openCreateDialog('docx')">
+                <span class="cd-upload-trigger__item-icon cd-upload-trigger__item-icon--docx">W</span>
+                <span>{{ t('files.newDocx') }}</span>
+              </button>
+              <button type="button" class="cd-upload-trigger__item" role="menuitem" @click="openCreateDialog('xlsx')">
+                <span class="cd-upload-trigger__item-icon cd-upload-trigger__item-icon--xlsx">X</span>
+                <span>{{ t('files.newXlsx') }}</span>
+              </button>
+              <button type="button" class="cd-upload-trigger__item" role="menuitem" @click="openCreateDialog('pptx')">
+                <span class="cd-upload-trigger__item-icon cd-upload-trigger__item-icon--pptx">P</span>
+                <span>{{ t('files.newPptx') }}</span>
+              </button>
+              <button type="button" class="cd-upload-trigger__item" role="menuitem" @click="openCreateDialog('csv')">
+                <span class="cd-upload-trigger__item-icon cd-upload-trigger__item-icon--csv">C</span>
+                <span>{{ t('files.newCsv') }}</span>
+              </button>
+              <button type="button" class="cd-upload-trigger__item" role="menuitem" @click="openCreateDialog('rtf')">
+                <span class="cd-upload-trigger__item-icon cd-upload-trigger__item-icon--rtf">R</span>
+                <span>{{ t('files.newRtf') }}</span>
+              </button>
+            </template>
+          </div>
+        </div>
         <button
-          v-if="permCanMkdir"
+          v-if="aiEnabled"
           type="button"
-          class="btn btn-sm d-inline-flex align-items-center gap-1"
-          @click="showMkdir = true"
+          class="btn btn-sm d-inline-flex align-items-center gap-1 d-md-none"
+          :class="aiMobileOpen ? 'btn-primary' : 'btn-outline-secondary'"
+          @click="aiMobileOpen = !aiMobileOpen"
         >
-          <IconFolderPlus :size="16" /> {{ t('files.mkdir') }}
+          <IconAiAgent :size="16" />
+          AI
         </button>
         <button
           v-if="permCanManageAcl"
           type="button"
-          class="btn btn-sm d-inline-flex align-items-center gap-1"
+          class="btn btn-sm d-none d-md-inline-flex align-items-center gap-1"
           :title="t('files.dirPermissions')"
           @click="openPathAcl(currentDirEntry)"
         >
           <IconShieldLock :size="16" /> {{ t('files.dirPermissions') }}
         </button>
-        <button type="button" class="btn btn-sm d-inline-flex align-items-center gap-1" :disabled="loading" @click="loadFiles">
+        <button
+          type="button"
+          class="btn btn-sm d-none d-md-inline-flex align-items-center gap-1"
+          :disabled="loading"
+          @click="loadFiles"
+        >
           <IconRefresh :size="16" :class="{ 'cd-spin': loading }" /> {{ t('common.refresh') }}
         </button>
-        <div v-if="toolbarHasFileActions" class="dropdown">
+        <div v-if="toolbarHasFileActions" class="dropdown d-none d-md-block">
           <button type="button" class="btn btn-sm dropdown-toggle d-inline-flex align-items-center gap-1" data-bs-toggle="dropdown">
             <IconDotsVertical :size="16" /> {{ t('common.more') }}
           </button>
@@ -1141,7 +1387,7 @@ watch(
                     <input class="form-check-input m-0" type="checkbox" :checked="allSelected" @change="toggleSelectAll" />
                   </th>
                   <th class="cd-file-name-col">名称</th>
-                  <th class="cd-file-actions-col d-none d-sm-table-cell" aria-label="操作"></th>
+                  <th class="cd-file-actions-col" aria-label="操作"></th>
                   <th class="d-none d-sm-table-cell">大小</th>
                   <th class="cd-file-modified-col d-none d-md-table-cell">修改时间</th>
                 </tr>
@@ -1153,6 +1399,10 @@ watch(
                   :class="{ selected: selected.has(item.id) }"
                   @click="onRowClick(item, idx, $event)"
                   @contextmenu="openContextMenu($event, item)"
+                  @pointerdown="onItemPointerDown($event, item)"
+                  @pointermove="onItemPointerMove"
+                  @pointerup="onItemPointerUp"
+                  @pointercancel="onItemPointerUp"
                 >
                   <td @click.stop>
                     <input
@@ -1175,7 +1425,7 @@ watch(
                       </span>
                     </span>
                   </td>
-                  <td class="cd-file-actions-col d-none d-sm-table-cell" @click.stop>
+                  <td class="cd-file-actions-col" @click.stop>
                     <FileRowToolbar
                       :item="item"
                       :share-label="rowShareLabel"
@@ -1199,32 +1449,46 @@ watch(
           </div>
 
           <div v-else class="cd-file-grid p-3">
-            <button
+            <div
               v-for="(item, idx) in filteredFiles"
               :key="item.id"
-              type="button"
               class="cd-grid-item"
               :class="{ selected: selected.has(item.id) }"
+              role="button"
+              tabindex="0"
               @click="onRowClick(item, idx, $event)"
+              @keydown.enter.prevent="openItem(item)"
               @contextmenu="openContextMenu($event, item)"
+              @pointerdown="onItemPointerDown($event, item)"
+              @pointermove="onItemPointerMove"
+              @pointerup="onItemPointerUp"
+              @pointercancel="onItemPointerUp"
             >
+              <button
+                type="button"
+                class="cd-grid-item__more"
+                title="更多"
+                @click="openItemMenu($event, item)"
+              >
+                <IconDotsVertical :size="16" />
+              </button>
               <FileTypeIcon :name="item.name" :is-dir="item.isDir" :mime-type="item.mimeType" :size="38" />
               <span class="cd-grid-name">{{ item.name }}</span>
               <span v-if="editorsFor(item.path).length" class="cd-file-editing-badge cd-file-editing-badge--grid">
                 {{ t('files.editingWith', { n: editorsFor(item.path).length }) }}
               </span>
               <span v-if="!item.isDir" class="cd-grid-meta">{{ fmtSize(item.size) }}</span>
-            </button>
+            </div>
           </div>
         </template>
 
         <div v-else class="cd-empty">
           <p class="mb-2">此目录为空</p>
-          <div class="cd-upload-trigger cd-upload-trigger--center" v-if="permCanUpload">
+          <div class="cd-upload-trigger cd-upload-trigger--center" :class="{ 'is-open': uploadMenuOpen }" v-if="permCanUpload">
             <button
               type="button"
               class="btn btn-sm btn-primary cd-upload-trigger__btn d-inline-flex align-items-center gap-1"
-              @click="pickUpload"
+              @click="toggleUploadMenu"
             >
               <IconUpload :size="16" /> 上传
             </button>
@@ -1250,14 +1514,39 @@ watch(
       <div v-if="selectedCount" class="cd-selection-bar">
         <span class="text-secondary">已选 {{ selectedCount }} 项</span>
         <button v-if="permCanRead" type="button" class="btn btn-sm" @click="onDownload">下载</button>
-        <button v-if="permCanRename" type="button" class="btn btn-sm" :disabled="selectedCount !== 1" @click="openRename(selectedItems[0])">重命名</button>
+        <button
+          v-if="permCanShare"
+          type="button"
+          class="btn btn-sm"
+          :disabled="selectedCount !== 1"
+          @click="openShare()"
+        >分享</button>
+        <button
+          v-if="permCanMoveCopy"
+          type="button"
+          class="btn btn-sm"
+          @click="openPathAction('move')"
+        >移动</button>
+        <button
+          v-if="permCanMoveCopy"
+          type="button"
+          class="btn btn-sm"
+          @click="openPathAction('copy')"
+        >复制</button>
+        <button
+          v-if="permCanRename"
+          type="button"
+          class="btn btn-sm"
+          :disabled="selectedCount !== 1"
+          @click="openRename(selectedItems[0])"
+        >重命名</button>
         <button v-if="permCanDelete" type="button" class="btn btn-sm btn-outline-danger" @click="doDelete()">删除</button>
       </div>
 
       <div class="cd-status-bar">
         共 {{ filteredFiles.length }} 项
         <template v-if="aiEnabled"> · AI 问答已开启（{{ aiStatus?.doc_count ?? 0 }} 份索引）</template>
-        · 右键菜单 · 拖拽上传 · Ctrl+A 全选
+        · {{ t('files.statusHint') }}
       </div>
     </div>
 
@@ -1265,22 +1554,31 @@ watch(
       :storage-id="currentStorageId"
       :path="currentPath"
       :status="aiStatus"
+      :mobile-open="aiMobileOpen"
+      @close-mobile="aiMobileOpen = false"
     />
     </div>
 
     <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked" />
     <input ref="dirInput" type="file" webkitdirectory multiple hidden @change="onDirPicked" />
 
-    <!-- 新建文件夹 -->
-    <CdModal :show="showMkdir" title="新建文件夹" size="sm" @close="showMkdir = false">
-      <form @submit.prevent="doMkdir">
+    <!-- 新建 -->
+    <CdModal
+      :show="showCreate"
+      :title="createKind === 'folder' ? t('files.newFolder') : t('files.createTitle')"
+      size="sm"
+      @close="showCreate = false"
+    >
+      <form @submit.prevent="doCreate">
         <div class="modal-body">
-          <label class="form-label">文件夹名称</label>
-          <input v-model="mkdirName" class="form-control" autofocus required />
+          <label class="form-label">{{ t('files.createName') }}</label>
+          <input v-model="createName" class="form-control" autofocus required />
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-sm" @click="showMkdir = false">取消</button>
-          <button type="submit" class="btn btn-sm btn-primary">创建</button>
+          <button type="button" class="btn btn-sm" @click="showCreate = false">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="creating">
+            {{ creating ? t('common.loading') : t('files.createConfirm') }}
+          </button>
         </div>
       </form>
     </CdModal>
@@ -1339,8 +1637,20 @@ watch(
       </form>
     </CdModal>
 
-    <!-- 预览 -->
-    <CdModal :show="showPreview" :title="previewTarget?.name || '预览'" size="lg" @close="closePreview">
+    <!-- 预览（全屏；PDF 在 OnlyOffice 未启用或无编辑权时走此路径） -->
+    <CdModal :show="showPreview" :title="previewTarget?.name || '预览'" size="full" @close="closePreview">
+      <!-- 勿对具名 slot 使用 v-if：$slots 检测非响应式，会导致「在线编辑」按钮不出现 -->
+      <template #header-actions>
+        <button
+          v-if="canEditPreviewPdf"
+          type="button"
+          class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1"
+          @click="previewTarget && openOfficeEditor(previewTarget)"
+        >
+          <IconPencil :size="16" />
+          {{ t('files.editOnline') }}
+        </button>
+      </template>
       <div class="modal-body cd-preview-body">
         <div v-if="previewLoading" class="text-center text-secondary py-5">{{ t('common.loading') }}</div>
         <div v-else-if="previewError" class="text-center text-secondary py-4">
@@ -1349,12 +1659,6 @@ watch(
             {{ t('files.download') }}
           </button>
         </div>
-        <img
-          v-else-if="previewIsImage && previewObjectUrl"
-          :src="previewObjectUrl"
-          :alt="previewTarget?.name"
-          class="cd-preview-img"
-        />
         <iframe
           v-else-if="previewIsPdf && previewObjectUrl"
           :src="previewObjectUrl"
@@ -1382,10 +1686,10 @@ watch(
         <div v-else class="text-center text-secondary py-4">
           <p>{{ t('files.previewUnsupported') }}</p>
           <button
-            v-if="previewTarget && filesApi.isOfficeEditable(previewTarget.name)"
+            v-if="previewTarget && (filesApi.isOfficeEditable(previewTarget.name) || filesApi.isTextEditable(previewTarget.name))"
             type="button"
             class="btn btn-sm btn-primary me-2"
-            @click="openOfficeEditor(previewTarget)"
+            @click="filesApi.isTextEditable(previewTarget.name) ? openTextEditor(previewTarget) : openOfficeEditor(previewTarget)"
           >
             {{ t('files.editOnline') }}
           </button>
@@ -1394,10 +1698,16 @@ watch(
           </button>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-sm" @click="closePreview">{{ t('common.close') }}</button>
-      </div>
     </CdModal>
+
+    <ImageLightbox
+      :show="showImageLightbox"
+      :storage-id="currentStorageId"
+      :images="directoryImages"
+      :initial-path="imageLightboxPath"
+      @close="closeImageLightbox"
+      @download="(item) => onDownload([item])"
+    />
 
     <FileRevisionsModal
       :show="showRevisions"

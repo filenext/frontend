@@ -15,6 +15,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!getToken() && !!user.value)
   const isAdmin = computed(() => user.value?.is_admin ?? false)
+  const isSuperAdmin = computed(() => user.value?.is_superadmin ?? false)
   const displayName = computed(
     () => user.value?.real_name || user.value?.username || '',
   )
@@ -107,6 +108,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionErrorShown,
     isLoggedIn,
     isAdmin,
+    isSuperAdmin,
     displayName,
     login,
     verifyTOTP,

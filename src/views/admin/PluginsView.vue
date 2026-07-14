@@ -6,10 +6,12 @@ import * as pluginsApi from '@/api/plugins'
 import type { PluginRow } from '@/api/plugins'
 import { usePageSize } from '@/composables/usePageSize'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import CdModal from '@/components/CdModal.vue'
 import CdPagination from '@/components/CdPagination.vue'
 
 const toast = useToast()
+const auth = useAuthStore()
 const { pageSize, ensurePageSize } = usePageSize()
 const plugins = ref<PluginRow[]>([])
 const total = ref(0)
@@ -190,7 +192,13 @@ onMounted(async () => {
           <button type="button" class="btn btn-sm btn-ghost-secondary" title="编辑" @click="openEdit(p)">
             <IconPencil :size="15" />
           </button>
-          <button type="button" class="btn btn-sm btn-ghost-danger ms-auto" title="删除" @click="remove(p)">
+          <button
+            v-if="auth.isSuperAdmin"
+            type="button"
+            class="btn btn-sm btn-ghost-danger ms-auto"
+            title="删除"
+            @click="remove(p)"
+          >
             <IconTrash :size="15" />
           </button>
         </div>

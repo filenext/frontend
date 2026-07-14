@@ -1,6 +1,6 @@
 # NextFile Web
 
-NextFile 的前端单页应用，基于 **Vue 3 + Vite + Pinia + Tabler**，提供文件管理、智能体对话与管理后台。
+NextFile 的前端单页应用，基于 **Vue 3 + Vite + Pinia + Tabler**，提供文件管理、智能体对话、协议网关配置与管理后台。
 
 GitHub：[filenext/frontend](https://github.com/filenext/frontend)
 
@@ -28,9 +28,9 @@ npm install
 npm run dev
 ```
 
-开发服务器：**http://127.0.0.1:5434**
+开发服务器：**http://127.0.0.1:8080**
 
-API 请求通过 Vite 代理转发到后端 `http://127.0.0.1:8080`（需先启动 [nextfile](../nextfile/README.md)）。
+API 请求通过 Vite 代理转发到后端 `http://127.0.0.1:8081`（需先启动 [nextfile](../nextfile/README.md)，开发时用 `PORT=8081`）。
 
 ### 其他命令
 
@@ -83,7 +83,7 @@ frontend/
 | `/profile` | 个人设置 | 登录 |
 | `/admin/users` | 用户管理 | 管理员 |
 | `/admin/configs` | 系统配置 | 管理员 |
-| `/admin/appearance` | 品牌与主题 | 管理员 |
+| `/admin/configs?tab=appearance` | 品牌与主题（系统配置内） | 管理员 |
 | `/admin/storages` | 存储源 / 云盘对接 / 同步任务 | 管理员 |
 | `/admin/departments` | 部门 | 管理员 |
 | `/admin/permissions` | 权限分配 | 管理员 |
@@ -117,6 +117,7 @@ frontend/
 - 验证码（按后台配置显示）
 - OAuth 第三方登录按钮
 - 管理员 TOTP 二次验证
+- 品牌区简介默认强调多存储、协议网关与 AI（可由「外观」覆盖）
 
 ### 存储源（`StoragesView`）
 
@@ -124,7 +125,7 @@ frontend/
 
 | Tab | 说明 |
 |-----|------|
-| 存储源 | 卡片列表，支持本地 / 协议 / 云盘驱动创建与 OAuth 授权 |
+| 存储源 | 卡片列表，支持本地 / 协议 / 云盘驱动创建与 OAuth 授权（把外部源挂进 NextFile） |
 | 云盘对接 | `CloudStoragePanel`，配置 OneDrive / Google / 百度应用凭证 |
 | 同步任务 | `StorageSyncPanel`，跨存储目录同步、定时调度、手动执行 |
 
@@ -141,6 +142,8 @@ frontend/
 | 发件邮箱 | `EmailPanel` |
 | LDAP | `LDAPPanel` |
 | ONLYOFFICE | `OnlyOfficePanel` |
+| 对外服务 | `GatewayPanel`（REST 说明 + WebDAV / FTP / SFTP / S3 / SMB / NFS 网关） |
+| 外观 | `AppearancePanel`（站点名、登录页介绍、主题色等） |
 
 ### 系统日志（`LogsView`）
 
@@ -153,9 +156,9 @@ frontend/
 | 登录日志 | `login` | 登录 / 登出 |
 | 审计日志 | `audit` | 安全审计事件 |
 
-### 品牌定制（`AppearanceView`）
+### 品牌定制（系统配置 → 外观）
 
-站点名称、副标题、主题色、Logo、Favicon、登录页介绍、页脚信息。
+站点名称、副标题、主题色、Logo、Favicon、登录页介绍、页脚信息。入口：`/admin/configs?tab=appearance`（旧路径 `/admin/appearance` 会重定向）。
 
 ---
 
@@ -178,8 +181,8 @@ frontend/
 ```ts
 // vite.config.ts
 proxy: {
-  '/api': { target: 'http://127.0.0.1:8080' },
-  '/avatars': { target: 'http://127.0.0.1:8080' },
+  '/api': { target: 'http://127.0.0.1:8081' },
+  '/avatars': { target: 'http://127.0.0.1:8081' },
 }
 ```
 

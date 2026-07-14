@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   IconAdjustments,
+  IconKey,
   IconLock,
   IconShieldLock,
   IconUser,
@@ -13,9 +14,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import AvatarPicker from '@/components/AvatarPicker.vue'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
+import TokensPanel from '@/views/profile/TokensPanel.vue'
 import { useI18n } from 'vue-i18n'
 
-type ProfileTab = 'basic' | 'preferences' | 'security'
+type ProfileTab = 'basic' | 'preferences' | 'security' | 'tokens'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -40,10 +42,11 @@ const totpLoading = ref(false)
 const nav = computed(() => [
   { id: 'basic' as const, label: '基本信息', icon: IconUser },
   { id: 'preferences' as const, label: t('profile.preferences'), icon: IconAdjustments },
+  { id: 'tokens' as const, label: '访问令牌', icon: IconKey },
   { id: 'security' as const, label: '账号安全', icon: IconShieldLock },
 ])
 
-const validTabs = new Set<ProfileTab>(['basic', 'preferences', 'security'])
+const validTabs = new Set<ProfileTab>(['basic', 'preferences', 'security', 'tokens'])
 
 function parseTab(raw: unknown): ProfileTab {
   if (typeof raw === 'string' && validTabs.has(raw as ProfileTab)) {
@@ -261,8 +264,11 @@ async function savePassword() {
         </div>
       </div>
 
+      <!-- 访问令牌 -->
+      <TokensPanel v-else-if="activeTab === 'tokens'" />
+
       <!-- 账号安全 -->
-      <div v-else class="cd-settings-panel">
+      <div v-else-if="activeTab === 'security'" class="cd-settings-panel">
         <h3 class="cd-settings-panel-title">账号安全</h3>
         <p class="text-secondary small mb-4">修改登录密码，并配置双因素认证提升安全性。</p>
 

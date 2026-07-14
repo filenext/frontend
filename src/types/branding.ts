@@ -33,7 +33,8 @@ export const DEFAULT_BRANDING: BrandingSettings = {
   logo_url: '',
   favicon_url: '',
   logo_text: '',
-  login_description: '安全、简洁的多存储源文件管理，内置 AI 对话与智能体扩展。支持本地存储，可扩展 S3 / FTP / SFTP。',
+  login_description:
+    '安全、简洁的多存储源文件管理，内置 AI 对话与智能体扩展。支持本地与多云接入，并可经开放协议对外访问。',
   footer_powered_by_name: 'NextFile',
   footer_icp: '',
   share_ad_image_url: '',

@@ -46,7 +46,7 @@ const callbackSourceHint = computed(() => {
   const src = callbackInfo.value?.base_url_source
   if (src === 'public_base_url') return '来自服务端 PUBLIC_BASE_URL 环境变量'
   if (src === 'x_forwarded_host') {
-    return '来自当前浏览器访问地址（经 Vite 代理转发，通常为 :5434 端口）'
+    return '来自当前浏览器访问地址（经 Vite 代理转发，开发环境通常为 :8080）'
   }
   return '来自当前 API 请求 Host'
 })
@@ -338,7 +338,7 @@ async function save() {
             <div class="form-text">{{ callbackSourceHint }}</div>
             <div class="form-text text-warning">
               须复制到云厂商「授权回调页」，与发起授权时<strong>完全一致</strong>。若报
-              <code>redirect_uri_mismatch</code>，说明登记地址与上方不一致（常见：登记了 <code>:8080</code> 但当前为 <code>:5434</code>）。
+              <code>redirect_uri_mismatch</code>，说明登记地址与上方不一致（请与当前浏览器地址栏主机一致）。
               生产环境建议设置 <code>PUBLIC_BASE_URL</code>。
             </div>
           </div>

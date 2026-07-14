@@ -4,6 +4,9 @@ export interface UserInfo {
   user_id: number
   username: string
   is_admin: boolean
+  is_superadmin?: boolean
+  role?: string
+  is_system?: boolean
   real_name: string | null
   department_id?: number | null
   department_name?: string

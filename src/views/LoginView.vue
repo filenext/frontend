@@ -7,6 +7,7 @@ import {
   IconShieldCheck,
   IconSparkles,
   IconAiAgent,
+  IconNetwork,
   IconEye,
   IconEyeOff,
   IconUser,
@@ -116,6 +117,7 @@ const heroDescription = computed(
 
 const features = computed(() => [
   { icon: IconCloudUpload, text: t('login.features.multiStorage') },
+  { icon: IconNetwork, text: t('login.features.gateway') },
   { icon: IconSparkles, text: t('login.features.aiChat') },
   { icon: IconAiAgent, text: t('login.features.agents') },
   { icon: IconShieldCheck, text: t('login.features.security') },

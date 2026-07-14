@@ -6,6 +6,7 @@ import type { MountRow } from '@/api/permissions'
 import * as usersApi from '@/api/users'
 import * as deptApi from '@/api/departments'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import CdModal from '@/components/CdModal.vue'
 import PermMaskPicker from '@/components/admin/PermMaskPicker.vue'
 import { Perm } from '@/utils/permissions'
@@ -19,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 const toast = useToast()
+const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const mounts = ref<MountRow[]>([])
@@ -190,7 +192,12 @@ onMounted(() => {
               <td><code>{{ m.root_path }}</code></td>
               <td class="small">{{ (m.perm_names || []).join(', ') }}</td>
               <td class="text-end">
-                <button type="button" class="btn btn-sm btn-ghost-danger" @click="remove(m)">删除</button>
+                <button
+                  v-if="auth.isSuperAdmin"
+                  type="button"
+                  class="btn btn-sm btn-ghost-danger"
+                  @click="remove(m)"
+                >删除</button>
               </td>
             </tr>
             <tr v-if="!mounts.length">

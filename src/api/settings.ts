@@ -2,6 +2,7 @@ import { request } from './client'
 
 export interface GeneralSettings {
   page_size: number
+  local_files_root: string
 }
 
 export interface OAuthProvider {
@@ -108,6 +109,40 @@ export interface CloudStorageSettings {
   apps: CloudStorageApp[]
 }
 
+export interface GatewayProtocolSettings {
+  enabled: boolean
+  port: number
+  listen: string
+  pasv_min_port?: number
+  pasv_max_port?: number
+}
+
+export interface GatewaySettings {
+  enabled: boolean
+  personal_tokens_enabled: boolean
+  public_host: string
+  default_storage_id: number
+  webdav: GatewayProtocolSettings
+  ftp: GatewayProtocolSettings
+  sftp: GatewayProtocolSettings
+  s3: GatewayProtocolSettings
+  smb: {
+    enabled: boolean
+    port: number
+    listen: string
+    share_name: string
+    public_host: string
+    discoverable: boolean
+  }
+  nfs: {
+    enabled: boolean
+    port: number
+    listen: string
+    export_path: string
+    public_host: string
+  }
+}
+
 export type SettingsSection =
   | 'general'
   | 'oauth'
@@ -117,6 +152,7 @@ export type SettingsSection =
   | 'email'
   | 'ldap'
   | 'onlyoffice'
+  | 'gateway'
 
 export function getSettings<T>(section: SettingsSection) {
   return request<T>(`/api/admin/settings/${section}`)

@@ -9,6 +9,7 @@ import type { CloudStorageSettings } from '@/api/settings'
 import type { StorageConfig, StorageRow } from '@/types/files'
 import { useToast } from '@/composables/useToast'
 import { usePageSize } from '@/composables/usePageSize'
+import { useAuthStore } from '@/stores/auth'
 import {
   defaultCloudStorageSettings,
   isCloudStorageDriver,
@@ -23,6 +24,7 @@ import StoragePermissionsModal from '@/components/admin/StoragePermissionsModal.
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 const { pageSize, ensurePageSize } = usePageSize()
 
 const storages = ref<StorageRow[]>([])
@@ -52,6 +54,7 @@ function emptyForm() {
     driver: 'local',
     root_path: '/',
     enabled: true,
+    sort_order: 0,
     remark: '',
     base_path: '',
     endpoint: '',
@@ -130,6 +133,7 @@ function storageMetaRows(s: StorageRow): StorageMetaRow[] {
   const c = s.config || {}
   const rows: StorageMetaRow[] = [
     { label: 'ID', value: s.id, mono: true },
+    { label: '排序', value: String(s.sort_order ?? 0) },
     { label: '驱动', value: driverLabel(s.driver), title: s.driver },
     { label: '虚拟根路径', value: s.root_path || '/', mono: true },
   ]
@@ -229,6 +233,7 @@ function fillForm(s: StorageRow) {
     driver: s.driver,
     root_path: s.root_path || '/',
     enabled: s.enabled,
+    sort_order: s.sort_order ?? 0,
     remark: s.remark || '',
     base_path: c.base_path || '',
     endpoint: c.endpoint || '',
@@ -349,6 +354,7 @@ async function save() {
     driver: form.value.driver,
     root_path: form.value.root_path || '/',
     enabled: form.value.enabled,
+    sort_order: form.value.sort_order ?? 0,
     remark: form.value.remark,
     config: buildConfig(),
   }
@@ -600,7 +606,12 @@ watch(
             <IconPencil :size="16" />
             编辑
           </button>
-          <button type="button" class="btn btn-sm btn-ghost-danger d-inline-flex align-items-center gap-1" @click="remove(s)">
+          <button
+            v-if="auth.isSuperAdmin"
+            type="button"
+            class="btn btn-sm btn-ghost-danger d-inline-flex align-items-center gap-1"
+            @click="remove(s)"
+          >
             <IconTrash :size="16" />
             删除
           </button>
@@ -626,9 +637,15 @@ watch(
     <CdModal :show="showForm" :title="editing ? '编辑存储源' : '添加存储源'" @close="showForm = false">
       <form @submit.prevent="save">
         <div class="modal-body">
-          <div class="mb-3">
-            <label class="form-label">名称</label>
-            <input v-model="form.name" class="form-control" required placeholder="例如：对象存储" />
+          <div class="row g-2 mb-3">
+            <div class="col-sm-8">
+              <label class="form-label">名称</label>
+              <input v-model="form.name" class="form-control" required placeholder="例如：对象存储" />
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label">排序</label>
+              <input v-model.number="form.sort_order" class="form-control" type="number" min="0" />
+            </div>
           </div>
           <div class="row g-2">
             <div class="col-sm-6">

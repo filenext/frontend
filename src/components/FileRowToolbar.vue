@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
 import {
   IconShare,
   IconDownload,
@@ -30,18 +31,35 @@ const emit = defineEmits<{
 }>()
 
 const iconProps = { size: 17, stroke: 1.75 }
+const moreOpen = ref(false)
+const rootEl = ref<HTMLElement | null>(null)
 
 function run(id: FileRowAction) {
+  moreOpen.value = false
   emit('action', id, props.item)
 }
+
+function toggleMore(e: MouseEvent) {
+  e.stopPropagation()
+  moreOpen.value = !moreOpen.value
+}
+
+function onDocPointerDown(e: Event) {
+  if (!moreOpen.value) return
+  const t = e.target as Node | null
+  if (rootEl.value && t && !rootEl.value.contains(t)) moreOpen.value = false
+}
+
+onMounted(() => document.addEventListener('pointerdown', onDocPointerDown, true))
+onUnmounted(() => document.removeEventListener('pointerdown', onDocPointerDown, true))
 </script>
 
 <template>
-  <div class="cd-file-row-actions" @click.stop>
+  <div ref="rootEl" class="cd-file-row-actions" @click.stop>
     <button
       v-if="canShare !== false"
       type="button"
-      class="cd-file-row-actions__btn"
+      class="cd-file-row-actions__btn d-none d-md-inline-flex"
       :title="shareLabel || '分享'"
       @click="run('share')"
     >
@@ -50,7 +68,7 @@ function run(id: FileRowAction) {
     <button
       v-if="canDownload !== false"
       type="button"
-      class="cd-file-row-actions__btn"
+      class="cd-file-row-actions__btn d-none d-md-inline-flex"
       title="下载"
       :disabled="item.isDir"
       @click="run('download')"
@@ -60,24 +78,49 @@ function run(id: FileRowAction) {
     <button
       v-if="canDelete !== false"
       type="button"
-      class="cd-file-row-actions__btn cd-file-row-actions__btn--danger"
+      class="cd-file-row-actions__btn cd-file-row-actions__btn--danger d-none d-md-inline-flex"
       title="删除"
       @click="run('delete')"
     >
       <IconTrash v-bind="iconProps" />
     </button>
     <div
-      v-if="canRename !== false || canCopy !== false || canMove !== false || canManageAcl"
+      v-if="canRename !== false || canCopy !== false || canMove !== false || canManageAcl || canShare !== false || canDownload !== false || canDelete !== false"
       class="cd-file-row-actions__more"
+      :class="{ 'is-open': moreOpen }"
     >
       <button
         type="button"
         class="cd-file-row-actions__btn"
         title="更多"
+        aria-haspopup="menu"
+        :aria-expanded="moreOpen"
+        @click="toggleMore"
       >
         <IconDotsVertical v-bind="iconProps" />
       </button>
       <div class="cd-file-row-actions__menu" role="menu">
+        <button
+          v-if="canShare !== false"
+          type="button"
+          class="cd-file-row-actions__menu-item d-md-none"
+          role="menuitem"
+          @click="run('share')"
+        >
+          <IconShare :size="16" :stroke="1.75" />
+          <span>{{ shareLabel || '分享' }}</span>
+        </button>
+        <button
+          v-if="canDownload !== false"
+          type="button"
+          class="cd-file-row-actions__menu-item d-md-none"
+          role="menuitem"
+          :disabled="item.isDir"
+          @click="run('download')"
+        >
+          <IconDownload :size="16" :stroke="1.75" />
+          <span>下载</span>
+        </button>
         <button
           v-if="canManageAcl && item.isDir"
           type="button"
@@ -117,6 +160,16 @@ function run(id: FileRowAction) {
         >
           <IconFolderSymlink :size="16" :stroke="1.75" />
           <span>移动</span>
+        </button>
+        <button
+          v-if="canDelete !== false"
+          type="button"
+          class="cd-file-row-actions__menu-item d-md-none text-danger"
+          role="menuitem"
+          @click="run('delete')"
+        >
+          <IconTrash :size="16" :stroke="1.75" />
+          <span>删除</span>
         </button>
       </div>
     </div>

@@ -7,11 +7,13 @@ import type { StorageSyncRow } from '@/api/storageSyncs'
 import * as storagesApi from '@/api/storages'
 import type { StorageRow } from '@/types/files'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import CdModal from '@/components/CdModal.vue'
 
 const props = defineProps<{ storages: StorageRow[] }>()
 
 const toast = useToast()
+const auth = useAuthStore()
 const syncs = ref<StorageSyncRow[]>([])
 const loading = ref(false)
 const showForm = ref(false)
@@ -272,7 +274,12 @@ onUnmounted(() => {
             {{ s.running || runningIds.has(s.id) ? '执行中…' : '立即同步' }}
           </button>
           <button type="button" class="btn btn-sm btn-ghost-secondary" @click="openEdit(s)">编辑</button>
-          <button type="button" class="btn btn-sm btn-ghost-danger d-inline-flex align-items-center gap-1" @click="remove(s)">
+          <button
+            v-if="auth.isSuperAdmin"
+            type="button"
+            class="btn btn-sm btn-ghost-danger d-inline-flex align-items-center gap-1"
+            @click="remove(s)"
+          >
             <IconTrash :size="16" /> 删除
           </button>
         </div>

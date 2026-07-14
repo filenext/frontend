@@ -33,7 +33,10 @@ function onBackdropClick() {
       >
         <div class="modal-content" :class="{ 'cd-modal-content--full': size === 'full' }">
           <div class="modal-header">
-            <h5 class="modal-title">{{ title }}</h5>
+            <h5 class="modal-title text-truncate me-2">{{ title }}</h5>
+            <div class="cd-modal-header-actions">
+              <slot name="header-actions" />
+            </div>
             <button type="button" class="btn-close" aria-label="关闭" @click="emit('close')" />
           </div>
           <slot />

@@ -26,6 +26,7 @@ export function buildFileContextMenu(opts: {
   hasSingleFile: boolean
   hasDownloadableFiles: boolean
   hasOfficeFile?: boolean
+  hasTextFile?: boolean
   isCloudDriver?: boolean
   supportsCloudShare?: boolean
   canShare?: boolean
@@ -45,6 +46,7 @@ export function buildFileContextMenu(opts: {
     hasSingleFile,
     hasDownloadableFiles,
     hasOfficeFile,
+    hasTextFile,
     isCloudDriver,
     supportsCloudShare,
     canShare = true,
@@ -60,17 +62,18 @@ export function buildFileContextMenu(opts: {
     isSingleDir = false,
   } = opts
   const hideLocalOnly = !!isCloudDriver
+  const canOnlineEdit = !!(hasOfficeFile || hasTextFile)
   const items: ContextMenuItem[] = []
 
   if (canPreview) {
     items.push({ id: 'preview', label: t('files.preview'), icon: IconEye, disabled: !hasSingleFile })
   }
-  if (!hideLocalOnly && canPreview) {
+  if (canPreview) {
     items.push({
-      id: 'editOffice',
+      id: 'editOnline',
       label: t('files.editOnline'),
       icon: IconPencil,
-      disabled: !hasSingleFile || !hasOfficeFile,
+      disabled: !hasSingleFile || !canOnlineEdit,
     })
   }
   if (!hideLocalOnly && canRead) {
@@ -137,7 +140,7 @@ export function buildFileContextMenu(opts: {
   }
 
   if (canMkdir) {
-    items.push({ id: 'mkdir', label: t('files.mkdir'), icon: IconFolderPlus })
+    items.push({ id: 'mkdir', label: t('files.new'), icon: IconFolderPlus })
   }
   if (canUpload) {
     items.push({ id: 'upload', label: t('files.upload'), icon: IconUpload })

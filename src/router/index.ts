@@ -17,6 +17,12 @@ const router = createRouter({
       meta: { auth: true },
     },
     {
+      path: '/files/text-edit',
+      name: 'text-edit',
+      component: () => import('@/views/TextEditorView.vue'),
+      meta: { auth: true },
+    },
+    {
       path: '/',
       component: () => import('@/layouts/MainLayout.vue'),
       meta: { auth: true },
@@ -53,24 +59,6 @@ const router = createRouter({
           meta: { admin: true, pageTitleKey: 'nav.users' },
         },
         {
-          path: 'admin/configs',
-          name: 'admin-configs',
-          component: () => import('@/views/admin/ConfigsView.vue'),
-          meta: { admin: true, pageTitleKey: 'nav.configs' },
-        },
-        {
-          path: 'admin/logs',
-          name: 'admin-logs',
-          component: () => import('@/views/admin/LogsView.vue'),
-          meta: { admin: true, pageTitleKey: 'nav.logs' },
-        },
-        {
-          path: 'admin/storages',
-          name: 'admin-storages',
-          component: () => import('@/views/admin/StoragesView.vue'),
-          meta: { admin: true, pageTitleKey: 'nav.storages' },
-        },
-        {
           path: 'admin/departments',
           name: 'admin-departments',
           component: () => import('@/views/admin/DepartmentsView.vue'),
@@ -83,10 +71,10 @@ const router = createRouter({
           meta: { admin: true, pageTitleKey: 'nav.permissions' },
         },
         {
-          path: 'admin/plugins',
-          name: 'admin-plugins',
-          component: () => import('@/views/admin/PluginsView.vue'),
-          meta: { admin: true, pageTitleKey: 'nav.plugins' },
+          path: 'admin/storages',
+          name: 'admin-storages',
+          component: () => import('@/views/admin/StoragesView.vue'),
+          meta: { admin: true, pageTitleKey: 'nav.storages' },
         },
         {
           path: 'admin/agents',
@@ -95,10 +83,26 @@ const router = createRouter({
           meta: { admin: true, pageTitleKey: 'nav.agentsAdmin' },
         },
         {
+          path: 'admin/plugins',
+          name: 'admin-plugins',
+          component: () => import('@/views/admin/PluginsView.vue'),
+          meta: { admin: true, pageTitleKey: 'nav.plugins' },
+        },
+        {
+          path: 'admin/configs',
+          name: 'admin-configs',
+          component: () => import('@/views/admin/ConfigsView.vue'),
+          meta: { admin: true, pageTitleKey: 'nav.configs' },
+        },
+        {
+          path: 'admin/logs',
+          name: 'admin-logs',
+          component: () => import('@/views/admin/LogsView.vue'),
+          meta: { admin: true, pageTitleKey: 'nav.logs' },
+        },
+        {
           path: 'admin/appearance',
-          name: 'admin-appearance',
-          component: () => import('@/views/admin/AppearanceView.vue'),
-          meta: { admin: true, pageTitleKey: 'nav.appearance' },
+          redirect: { path: '/admin/configs', query: { tab: 'appearance' } },
         },
         { path: 'admin', redirect: '/admin/overview' },
       ],

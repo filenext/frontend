@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { LOCALE_OPTIONS, LOCALE_STORAGE_KEY, type AppLocale, setDocumentLang } from '@/i18n'
 
@@ -10,6 +10,8 @@ const NATIVE_LABELS: Record<AppLocale, string> = {
 }
 
 const { locale } = useI18n()
+const open = ref(false)
+const rootEl = ref<HTMLElement | null>(null)
 
 const currentLabel = computed(() => NATIVE_LABELS[locale.value as AppLocale])
 
@@ -20,16 +22,39 @@ const otherOptions = computed(() =>
   })),
 )
 
+function toggle() {
+  open.value = !open.value
+}
+
 function setLocale(val: AppLocale) {
   locale.value = val
   localStorage.setItem(LOCALE_STORAGE_KEY, val)
   setDocumentLang(val)
+  open.value = false
 }
+
+function onDocPointerDown(e: PointerEvent) {
+  if (!open.value || !rootEl.value) return
+  if (!rootEl.value.contains(e.target as Node)) {
+    open.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('pointerdown', onDocPointerDown))
+onUnmounted(() => document.removeEventListener('pointerdown', onDocPointerDown))
 </script>
 
 <template>
-  <div class="cd-login-lang">
-    <span class="cd-login-lang-current">{{ currentLabel }}</span>
+  <div ref="rootEl" class="cd-login-lang" :class="{ 'cd-login-lang--open': open }">
+    <button
+      type="button"
+      class="cd-login-lang-current"
+      :aria-expanded="open"
+      aria-haspopup="menu"
+      @click="toggle"
+    >
+      {{ currentLabel }}
+    </button>
     <span class="cd-login-lang-menu" role="menu" :aria-label="currentLabel">
       <button
         v-for="opt in otherOptions"

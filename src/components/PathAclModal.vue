@@ -8,6 +8,7 @@ import * as usersApi from '@/api/users'
 import * as deptApi from '@/api/departments'
 import CdModal from '@/components/CdModal.vue'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import type { FileEntry } from '@/types/files'
 import {
   Perm,
@@ -27,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 const toast = useToast()
+const auth = useAuthStore()
 const { t } = useI18n()
 
 const loading = ref(false)
@@ -329,7 +331,12 @@ watch(
                 <td>{{ row.inherit ? '是' : '否' }}</td>
                 <td class="text-end text-nowrap">
                   <button type="button" class="btn btn-sm btn-ghost-secondary me-1" @click="editEntry(row)">编辑</button>
-                  <button type="button" class="btn btn-sm btn-ghost-danger" @click="removeEntry(row)">移除</button>
+                  <button
+                    v-if="auth.isSuperAdmin"
+                    type="button"
+                    class="btn btn-sm btn-ghost-danger"
+                    @click="removeEntry(row)"
+                  >移除</button>
                 </td>
               </tr>
               <tr v-if="!entries.length">

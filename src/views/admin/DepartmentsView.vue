@@ -6,10 +6,12 @@ import * as deptApi from '@/api/departments'
 import type { DepartmentRow } from '@/api/departments'
 import { useToast } from '@/composables/useToast'
 import { usePageSize } from '@/composables/usePageSize'
+import { useAuthStore } from '@/stores/auth'
 import CdModal from '@/components/CdModal.vue'
 import CdPagination from '@/components/CdPagination.vue'
 
 const toast = useToast()
+const auth = useAuthStore()
 const { pageSize, ensurePageSize } = usePageSize()
 const departments = ref<DepartmentRow[]>([])
 const allDepartments = ref<DepartmentRow[]>([])
@@ -142,7 +144,12 @@ onMounted(async () => {
                 <button type="button" class="btn btn-sm btn-ghost-secondary" @click="openEdit(d)">
                   <IconPencil :size="16" />
                 </button>
-                <button type="button" class="btn btn-sm btn-ghost-danger" @click="remove(d)">
+                <button
+                  v-if="auth.isSuperAdmin"
+                  type="button"
+                  class="btn btn-sm btn-ghost-danger"
+                  @click="remove(d)"
+                >
                   <IconTrash :size="16" />
                 </button>
               </td>

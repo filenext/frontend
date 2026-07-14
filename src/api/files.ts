@@ -62,6 +62,21 @@ export async function mkdir(storageId: string, parentPath: string, name: string)
   })
 }
 
+/** Create or overwrite a file in dir via the existing upload endpoint. */
+export async function createFile(
+  storageId: string,
+  dirPath: string,
+  filename: string,
+  content: Blob | string,
+) {
+  const blob =
+    typeof content === 'string'
+      ? new Blob([content], { type: 'text/plain;charset=utf-8' })
+      : content
+  const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' })
+  await uploadFileWithProgress(storageId, dirPath || '/', { file })
+}
+
 export async function uploadFiles(storageId: string, path: string, files: UploadEntry[]) {
   for (const entry of files) {
     await uploadFileWithProgress(storageId, path, entry)
@@ -429,10 +444,36 @@ export async function createCloudShare(
   })
 }
 
-const OFFICE_EXT = /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf|csv)$/i
+const OFFICE_EXT = /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf|csv|pdf)$/i
+const TEXT_EDIT_EXT = /\.(txt|md|markdown)$/i
 
 export function isOfficeEditable(name: string) {
   return OFFICE_EXT.test(name.toLowerCase())
+}
+
+export function isPdfFile(name: string) {
+  return /\.pdf$/i.test(name)
+}
+
+export function isTextEditable(name: string) {
+  return TEXT_EDIT_EXT.test(name.toLowerCase())
+}
+
+export function isMarkdownFile(name: string) {
+  return /\.(md|markdown)$/i.test(name)
+}
+
+/** Load file bytes for text editing (auth header, same as preview). */
+export async function fetchFileText(storageId: string, path: string): Promise<string> {
+  const blob = await fetchPreviewBlob(storageId, path)
+  return blob.text()
+}
+
+export async function saveFileText(storageId: string, filePath: string, content: string) {
+  const name = filePath.split('/').filter(Boolean).pop() || 'file.txt'
+  const dir = parentPath(filePath)
+  const mime = isMarkdownFile(name) ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8'
+  await createFile(storageId, dir, name, new Blob([content], { type: mime }))
 }
 
 export async function onlyOfficeStatus() {

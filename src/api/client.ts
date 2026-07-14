@@ -97,7 +97,7 @@ async function rawRequest<T>(
   }
 
   if (res.status >= 500) {
-    throw new ApiError(json?.msg || '服务器异常，请稍后重试', res.status)
+    throw new ApiError(json?.msg || '服务器异常，请稍后重试', json?.code || res.status)
   }
 
   if (res.status === 401 || json?.code === 401) {
@@ -107,6 +107,11 @@ async function rawRequest<T>(
     }
     throw new ApiError(json?.msg || '未登录', 401)
   }
+
+  if (res.status === 403 || json?.code === 403) {
+    throw new ApiError(json?.msg || '无权限', 403)
+  }
+
   if (!json || json.success !== 1) {
     throw new ApiError(json?.msg || '请求失败', json?.code || res.status || 400)
   }

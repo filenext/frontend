@@ -9,12 +9,15 @@ import {
   IconAdjustments,
   IconLock,
   IconFileText,
+  IconNetwork,
+  IconPalette,
 } from '@tabler/icons-vue'
 import { ApiError } from '@/api/client'
 import * as settingsApi from '@/api/settings'
 import type {
   AccessSettings,
   EmailSettings,
+  GatewaySettings,
   GeneralSettings,
   LDAPSettings,
   OAuthSettings,
@@ -31,13 +34,17 @@ import AccessPanel from './config/AccessPanel.vue'
 import EmailPanel from './config/EmailPanel.vue'
 import LDAPPanel from './config/LDAPPanel.vue'
 import OnlyOfficePanel from './config/OnlyOfficePanel.vue'
+import GatewayPanel from './config/GatewayPanel.vue'
+import AppearancePanel from './config/AppearancePanel.vue'
+
+type ConfigTab = SettingsSection | 'appearance'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const loading = ref(false)
 
-const general = ref<GeneralSettings>({ page_size: 20 })
+const general = ref<GeneralSettings>({ page_size: 20, local_files_root: '' })
 const oauth = ref<OAuthSettings>({ enabled: false, providers: [] })
 const security = ref<SecuritySettings>({
   captcha_enabled: false,
@@ -82,29 +89,47 @@ const onlyoffice = ref<OnlyOfficeSettings>({
   version_keep: 5,
   callback_base_url: '',
 })
+const gateway = ref<GatewaySettings>({
+  enabled: false,
+  personal_tokens_enabled: true,
+  public_host: '',
+  default_storage_id: 0,
+  webdav: { enabled: false, port: 8082, listen: '0.0.0.0' },
+  ftp: { enabled: false, port: 2121, listen: '0.0.0.0' },
+  sftp: { enabled: false, port: 2222, listen: '0.0.0.0' },
+  s3: { enabled: false, port: 9000, listen: '0.0.0.0' },
+  smb: { enabled: false, port: 445, listen: '0.0.0.0', share_name: 'nextfile', public_host: '', discoverable: false },
+  nfs: { enabled: false, port: 2049, listen: '0.0.0.0', export_path: '', public_host: '' },
+})
 
-const nav: { id: SettingsSection; label: string; icon: typeof IconAdjustments }[] = [
+const nav: { id: ConfigTab; label: string; icon: typeof IconAdjustments }[] = [
   { id: 'general', label: '常规', icon: IconAdjustments },
-  { id: 'oauth', label: 'OAuth 登录', icon: IconBrandGithub },
+  { id: 'appearance', label: '外观', icon: IconPalette },
   { id: 'security', label: '安全', icon: IconShieldLock },
   { id: 'access', label: '访问控制', icon: IconLock },
-  { id: 'email', label: '发件邮箱', icon: IconMail },
+  { id: 'oauth', label: 'OAuth 登录', icon: IconBrandGithub },
   { id: 'ldap', label: 'LDAP / 域', icon: IconServer },
+  { id: 'email', label: '发件邮箱', icon: IconMail },
   { id: 'onlyoffice', label: 'ONLYOFFICE', icon: IconFileText },
+  { id: 'gateway', label: '对外服务', icon: IconNetwork },
 ]
 
 const validSections = new Set(nav.map((n) => n.id))
 
-function parseTab(raw: unknown): SettingsSection {
-  if (typeof raw === 'string' && validSections.has(raw as SettingsSection)) {
-    return raw as SettingsSection
+function parseTab(raw: unknown): ConfigTab {
+  if (typeof raw === 'string' && validSections.has(raw as ConfigTab)) {
+    return raw as ConfigTab
   }
   return 'general'
 }
 
 const activeTab = computed(() => parseTab(route.query.tab))
 
-async function loadSection(section: SettingsSection) {
+async function loadSection(section: ConfigTab) {
+  if (section === 'appearance') {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     switch (section) {
@@ -132,6 +157,9 @@ async function loadSection(section: SettingsSection) {
       case 'onlyoffice':
         onlyoffice.value = await settingsApi.getSettings<OnlyOfficeSettings>('onlyoffice')
         break
+      case 'gateway':
+        gateway.value = await settingsApi.getSettings<GatewaySettings>('gateway')
+        break
     }
   } catch (e) {
     toast.show(e instanceof ApiError ? e.message : '加载失败')
@@ -140,7 +168,7 @@ async function loadSection(section: SettingsSection) {
   }
 }
 
-function selectSection(id: SettingsSection) {
+function selectSection(id: ConfigTab) {
   if (id === activeTab.value) return
   router.replace({ path: '/admin/configs', query: { tab: id } })
 }
@@ -190,12 +218,14 @@ onMounted(async () => {
       <div v-if="loading" class="text-center text-secondary py-5">加载中…</div>
       <template v-else>
         <GeneralPanel v-if="activeTab === 'general'" v-model="general" />
+        <AppearancePanel v-else-if="activeTab === 'appearance'" />
         <OAuthPanel v-else-if="activeTab === 'oauth'" v-model="oauth" />
         <SecurityPanel v-else-if="activeTab === 'security'" v-model="security" />
         <AccessPanel v-else-if="activeTab === 'access'" v-model="access" />
         <EmailPanel v-else-if="activeTab === 'email'" v-model="email" />
         <LDAPPanel v-else-if="activeTab === 'ldap'" v-model="ldap" />
         <OnlyOfficePanel v-else-if="activeTab === 'onlyoffice'" v-model="onlyoffice" />
+        <GatewayPanel v-else-if="activeTab === 'gateway'" v-model="gateway" />
       </template>
     </main>
   </div>

@@ -8,12 +8,14 @@ import * as usersApi from '@/api/users'
 import * as deptApi from '@/api/departments'
 import { usePageSize } from '@/composables/usePageSize'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import CdModal from '@/components/CdModal.vue'
 import CdPagination from '@/components/CdPagination.vue'
 import PermMaskPicker from '@/components/admin/PermMaskPicker.vue'
 import { Perm } from '@/utils/permissions'
 
 const toast = useToast()
+const auth = useAuthStore()
 const { pageSize, ensurePageSize } = usePageSize()
 const tab = ref<'mounts' | 'acl'>('mounts')
 
@@ -187,7 +189,14 @@ onMounted(async () => {
                 <td>{{ storageLabel(m.storage_id) }}</td>
                 <td><code>{{ m.root_path }}</code></td>
                 <td class="small">{{ (m.perm_names || []).join(', ') }}</td>
-                <td class="text-end"><button type="button" class="btn btn-sm btn-ghost-danger" @click="removeMount(m)">删除</button></td>
+                <td class="text-end">
+                  <button
+                    v-if="auth.isSuperAdmin"
+                    type="button"
+                    class="btn btn-sm btn-ghost-danger"
+                    @click="removeMount(m)"
+                  >删除</button>
+                </td>
               </tr>
               <tr v-if="!mounts.length && !loading"><td colspan="5" class="text-center text-secondary py-4">暂无规则</td></tr>
             </tbody>
@@ -229,7 +238,14 @@ onMounted(async () => {
                 <td>{{ row.principal_type }} / {{ principalLabel(row) }}</td>
                 <td class="small">{{ summarizeAcl(row) }}</td>
                 <td>{{ row.inherit ? '是' : '否' }}</td>
-                <td class="text-end"><button type="button" class="btn btn-sm btn-ghost-danger" @click="removeAcl(row)">删除</button></td>
+                <td class="text-end">
+                  <button
+                    v-if="auth.isSuperAdmin"
+                    type="button"
+                    class="btn btn-sm btn-ghost-danger"
+                    @click="removeAcl(row)"
+                  >删除</button>
+                </td>
               </tr>
               <tr v-if="!aclRows.length && !loading"><td colspan="5" class="text-center text-secondary py-4">暂无路径 ACL</td></tr>
             </tbody>
