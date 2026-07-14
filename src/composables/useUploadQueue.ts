@@ -57,6 +57,7 @@ async function processQueue() {
       if (!task) break
       task.status = 'uploading'
       task.progress = 0
+      task.error = undefined
       try {
         await filesApi.uploadFileWithProgress(
           task.storageId,
@@ -88,6 +89,17 @@ async function processQueue() {
   }
 }
 
+function retry(taskId: string) {
+  const task = tasks.value.find((t) => t.id === taskId)
+  if (!task || task.status !== 'error') return
+  task.status = 'pending'
+  task.error = undefined
+  task.progress = 0
+  activeTab.value = 'uploading'
+  collapsed.value = false
+  void processQueue()
+}
+
 function clearDone() {
   tasks.value = tasks.value.filter((t) => t.status !== 'done')
   if (!tasks.value.length) collapsed.value = false
@@ -114,6 +126,7 @@ export function useUploadQueue() {
     uploadingCount,
     doneCount,
     enqueue,
+    retry,
     clearDone,
     dismiss,
     toggleCollapsed,

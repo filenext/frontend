@@ -121,9 +121,21 @@ const headerHint = computed(() => {
               />
             </div>
           </div>
-          <IconCircleCheck v-if="item.status === 'done'" :size="18" class="text-success flex-shrink-0" />
+          <button
+            v-if="item.status === 'error'"
+            type="button"
+            class="btn btn-sm btn-outline-primary flex-shrink-0 py-0 px-2"
+            title="继续上传（大文件会从断点续传）"
+            @click="queue.retry(item.id)"
+          >
+            继续
+          </button>
+          <IconCircleCheck v-else-if="item.status === 'done'" :size="18" class="text-success flex-shrink-0" />
           <IconCircleX v-else-if="item.status === 'error'" :size="18" class="text-danger flex-shrink-0" />
         </div>
+      </div>
+      <div v-if="queue.uploadingTasks.value.some((t) => t.status === 'error')" class="cd-upload-panel-hint">
+        失败后点「继续」可断点续传；刷新后请重新选择相同文件。
       </div>
     </div>
   </div>

@@ -2223,6 +2223,13 @@ body {
   font-size: 0.8125rem;
 }
 
+.cd-upload-panel-hint {
+  padding: 0.4rem 0.75rem 0.65rem;
+  font-size: 0.75rem;
+  color: var(--tblr-secondary);
+  border-top: 1px solid rgba(15, 23, 42, 0.05);
+}
+
 .cd-upload-panel-item {
   display: flex;
   align-items: flex-start;

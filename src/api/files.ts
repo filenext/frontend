@@ -2,6 +2,11 @@ import { getToken, request, ApiError } from '@/api/client'
 import type { UploadEntry } from '@/utils/folderUpload'
 import type { FileEntry } from '@/types/files'
 import { joinPath, parentPath } from '@/utils/paths'
+import {
+  clearStoredUploadId,
+  fileFingerprint,
+  setStoredUploadId,
+} from '@/utils/uploadSession'
 
 export interface ListFilesResult {
   path: string
@@ -63,7 +68,12 @@ export async function uploadFiles(storageId: string, path: string, files: Upload
   }
 }
 
-export function uploadFileWithProgress(
+const CHUNK_THRESHOLD = 8 << 20 // 8 MiB
+const DEFAULT_CHUNK_SIZE = 4 << 20
+const CHUNK_CONCURRENCY = 3
+const CHUNK_RETRIES = 2
+
+function uploadSimpleWithProgress(
   storageId: string,
   path: string,
   entry: UploadEntry,
@@ -110,6 +120,171 @@ export function uploadFileWithProgress(
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.send(fd)
   })
+}
+
+interface InitResult {
+  upload_id: string
+  chunk_size: number
+  total_chunks: number
+  uploaded: number[]
+  file_size: number
+  target_path: string
+}
+
+async function initChunkedUpload(
+  storageId: string,
+  path: string,
+  entry: UploadEntry,
+  fingerprint: string,
+): Promise<InitResult> {
+  return request<InitResult>('/api/files/upload/init', {
+    method: 'POST',
+    body: JSON.stringify({
+      storage_id: storageId,
+      path: path || '/',
+      relative_path: entry.relativePath || '',
+      file_name: entry.file.name,
+      file_size: entry.file.size,
+      chunk_size: DEFAULT_CHUNK_SIZE,
+      fingerprint,
+    }),
+  })
+}
+
+function putChunk(
+  uploadId: string,
+  index: number,
+  blob: Blob,
+  onChunkProgress?: (loaded: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onChunkProgress) onChunkProgress(e.loaded)
+    })
+    xhr.addEventListener('load', () => {
+      try {
+        const json = JSON.parse(xhr.responseText || '{}') as {
+          success?: number
+          msg?: string
+          code?: number
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && json.success === 1) {
+          resolve()
+          return
+        }
+        reject(new ApiError(json.msg || '分片上传失败', json.code || xhr.status))
+      } catch {
+        reject(new ApiError('分片上传失败', xhr.status || 500))
+      }
+    })
+    xhr.addEventListener('error', () => reject(new ApiError('网络错误', 0)))
+    xhr.addEventListener('abort', () => reject(new ApiError('上传已取消', 0)))
+    xhr.open('PUT', `/api/files/upload/${encodeURIComponent(uploadId)}/chunks/${index}`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.send(blob)
+  })
+}
+
+async function putChunkWithRetry(
+  uploadId: string,
+  index: number,
+  blob: Blob,
+  onChunkProgress?: (loaded: number) => void,
+) {
+  let lastErr: unknown
+  for (let i = 0; i <= CHUNK_RETRIES; i++) {
+    try {
+      await putChunk(uploadId, index, blob, onChunkProgress)
+      return
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr
+}
+
+async function uploadChunkedWithProgress(
+  storageId: string,
+  path: string,
+  entry: UploadEntry,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  const targetKey = entry.relativePath || entry.file.name
+  const fingerprint = fileFingerprint(storageId, `${path || '/'}:${targetKey}`, entry.file)
+  const init = await initChunkedUpload(storageId, path, entry, fingerprint)
+  setStoredUploadId(fingerprint, init.upload_id)
+
+  const uploadedSet = new Set(init.uploaded || [])
+  const chunkSize = init.chunk_size
+  const total = init.total_chunks
+  const fileSize = entry.file.size
+  const chunkProgress = new Map<number, number>()
+
+  const report = () => {
+    if (!onProgress) return
+    let done = 0
+    for (let i = 0; i < total; i++) {
+      if (uploadedSet.has(i)) {
+        const start = i * chunkSize
+        const end = Math.min(start + chunkSize, fileSize)
+        done += end - start
+      } else {
+        done += chunkProgress.get(i) || 0
+      }
+    }
+    onProgress(Math.min(99, Math.round((done / Math.max(fileSize, 1)) * 100)))
+  }
+  report()
+
+  const pending: number[] = []
+  for (let i = 0; i < total; i++) {
+    if (!uploadedSet.has(i)) pending.push(i)
+  }
+
+  let cursor = 0
+  async function worker() {
+    while (cursor < pending.length) {
+      const index = pending[cursor++]
+      const start = index * chunkSize
+      const end = Math.min(start + chunkSize, fileSize)
+      const blob = entry.file.slice(start, end)
+      await putChunkWithRetry(init.upload_id, index, blob, (loaded) => {
+        chunkProgress.set(index, loaded)
+        report()
+      })
+      uploadedSet.add(index)
+      chunkProgress.delete(index)
+      report()
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(CHUNK_CONCURRENCY, Math.max(pending.length, 1)) }, () =>
+    worker(),
+  )
+  await Promise.all(workers)
+
+  await request(`/api/files/upload/${encodeURIComponent(init.upload_id)}/complete`, {
+    method: 'POST',
+    body: '{}',
+  })
+  clearStoredUploadId(fingerprint)
+  onProgress?.(100)
+}
+
+export async function uploadFileWithProgress(
+  storageId: string,
+  path: string,
+  entry: UploadEntry,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  if (entry.file.size >= CHUNK_THRESHOLD) {
+    await uploadChunkedWithProgress(storageId, path, entry, onProgress)
+    return
+  }
+  await uploadSimpleWithProgress(storageId, path, entry, onProgress)
 }
 
 export async function deleteFiles(storageId: string, paths: string[]) {
